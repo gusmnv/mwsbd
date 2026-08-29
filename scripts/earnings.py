@@ -242,7 +242,7 @@ def render_day_image(day_iso: str, entries: list[dict], mcaps: dict) -> bytes:
     session_order = {"bmo": 0, "dmh": 1, "amc": 2}
     rows = sorted(entries, key=lambda e: (session_order.get(e.get("hour", ""), 3),
                                           -(mcaps.get(e.get("symbol")) or 0)))
-    W = 1080
+    W = 1180
     title_h, header_h, row_h, footer_h = 84, 56, 60, 44
     H = title_h + header_h + row_h * len(rows) + footer_h
 
@@ -258,14 +258,14 @@ def render_day_image(day_iso: str, entries: list[dict], mcaps: dict) -> bytes:
     d.text((40, 24), dt.strftime("%A %m/%d"), font=f_title, fill=(20, 24, 31))
 
     # column x anchors: ticker left; numbers right-aligned; timing right
-    X_TICK, X_MCAP, X_EPS, X_REV, X_TIME = 50, 460, 660, 880, 1040
+    X_TICK, X_MCAP, X_EPS, X_REV, X_TIME = 50, 430, 660, 950, 1140
     y = title_h
     d.rectangle([30, y, W - 30, y + header_h], fill=(246, 247, 249))
     ty = y + 16
     d.text((X_TICK, ty), "Company", font=f_head, fill=(55, 63, 75))
     d.text((X_MCAP, ty), "Market cap", font=f_head, fill=(55, 63, 75), anchor="ra")
-    d.text((X_EPS, ty), "EPS est", font=f_head, fill=(55, 63, 75), anchor="ra")
-    d.text((X_REV, ty), "Revenue est", font=f_head, fill=(55, 63, 75), anchor="ra")
+    d.text((X_EPS, ty), "EPS estimate", font=f_head, fill=(55, 63, 75), anchor="ra")
+    d.text((X_REV, ty), "Revenue estimate", font=f_head, fill=(55, 63, 75), anchor="ra")
     d.text((X_TIME, ty), "Timing", font=f_head, fill=(55, 63, 75), anchor="ra")
 
     y += header_h
