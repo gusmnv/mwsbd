@@ -37,14 +37,16 @@ REPORTED_FILE = STATE_DIR / "reported_earnings.json"
 MCAP_CACHE_FILE = STATE_DIR / "mcap_cache.json"
 
 # ---- region by ticker suffix -------------------------------------------------
+EU = "🇪🇺"  # all European Union listings show the EU flag, per Mr Wall Street
 SUFFIX_FLAG = {
     "SS": "🇨🇳", "SZ": "🇨🇳", "HK": "🇭🇰", "T": "🇯🇵", "KS": "🇰🇷", "KQ": "🇰🇷",
-    "L": "🇬🇧", "PA": "🇫🇷", "DE": "🇩🇪", "F": "🇩🇪", "MI": "🇮🇹", "AS": "🇳🇱",
-    "BR": "🇧🇪", "MC": "🇪🇸", "LS": "🇵🇹", "SW": "🇨🇭", "ST": "🇸🇪", "OL": "🇳🇴",
-    "CO": "🇩🇰", "HE": "🇫🇮", "VI": "🇦🇹", "TO": "🇨🇦", "V": "🇨🇦", "AX": "🇦🇺",
-    "NZ": "🇳🇿", "SA": "🇧🇷", "MX": "🇲🇽", "JK": "🇮🇩", "BK": "🇹🇭", "SI": "🇸🇬",
-    "KL": "🇲🇾", "TW": "🇹🇼", "TWO": "🇹🇼", "NS": "🇮🇳", "BO": "🇮🇳", "IS": "🇹🇷",
-    "WA": "🇵🇱", "PR": "🇨🇿", "AT": "🇬🇷", "IR": "🇮🇪", "TA": "🇮🇱", "JO": "🇿🇦",
+    "L": "🇬🇧", "SW": "🇨🇭", "OL": "🇳🇴",  # non-EU Europe keeps its own flag
+    "PA": EU, "DE": EU, "F": EU, "MI": EU, "AS": EU, "BR": EU, "MC": EU,
+    "LS": EU, "ST": EU, "CO": EU, "HE": EU, "VI": EU, "WA": EU, "PR": EU,
+    "AT": EU, "IR": EU,
+    "TO": "🇨🇦", "V": "🇨🇦", "AX": "🇦🇺", "NZ": "🇳🇿", "SA": "🇧🇷", "MX": "🇲🇽",
+    "JK": "🇮🇩", "BK": "🇹🇭", "SI": "🇸🇬", "KL": "🇲🇾", "TW": "🇹🇼", "TWO": "🇹🇼",
+    "NS": "🇮🇳", "BO": "🇮🇳", "IS": "🇹🇷", "TA": "🇮🇱", "JO": "🇿🇦",
 }
 
 def flag(symbol: str) -> str:
