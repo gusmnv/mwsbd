@@ -53,8 +53,9 @@ def parse(events):
     return by_day
 
 
-W_T, W_C, W_I, W_F, W_P = 7, 3, 6, 8, 8
-TABLE_WIDTH = W_T + W_C + W_I + W_F + W_P + 4 * 2
+COLS = [("TIME (ET)", 10), ("CUR", 5), ("IMPACT", 8),
+        ("EVENT", 32), ("FORECAST", 10), ("PREVIOUS", 10)]
+TABLE_WIDTH = sum(w for _, w in COLS) + 2 * (len(COLS) - 1)
 
 
 def _C(s, w):
@@ -64,33 +65,21 @@ def _C(s, w):
     return s.center(w)
 
 
-def _L(s, w):
-    s = str(s)
-    if len(s) > w:
-        s = s[: w - 1] + "…"
-    return s.ljust(w)
-
-
 def day_table_message(day, items) -> str:
-    """Two lines per event, <=40 chars wide so phones never wrap:
-       time/cur/impact/forecast/previous row + indented event-name row."""
-    title = (f"__**{day.strftime('%A')}, {ordinal(day.day)} {day.strftime('%B')}**__"
-             f"  ·  times ET (NY)")
-    header = (_L("TIME", W_T) + "  " + _L("CUR", W_C) + "  " + _C("IMPACT", W_I)
-              + "  " + _C("FORECAST", W_F) + "  " + _C("PREV", W_P))
+    title = f"__**{day.strftime('%A')}, {ordinal(day.day)} {day.strftime('%B')}**__"
+    header = "  ".join(_C(h, w) for h, w in COLS)
     sep = "-" * TABLE_WIDTH
-    lines = [header, sep]
+    lines = []
     for dt, ev in items:
         t = dt.strftime("%-I:%M%p").lower() if (dt.hour or dt.minute) else "All day"
-        lines.append(_L(t, W_T) + "  " + _L(ev.get("country", "").upper(), W_C) + "  "
-                     + _C(ev.get("impact", "").title(), W_I) + "  "
-                     + _C(ev.get("forecast") or "—", W_F) + "  "
-                     + _C(ev.get("previous") or "—", W_P))
-        lines.append("  " + str(ev.get("title", ""))[:38])
-        lines.append("")
-    while lines and not lines[-1].strip():
-        lines.pop()
-    return title + "\n```\n" + "\n".join(lines) + "\n```"
+        cells = [t,
+                 ev.get("country", "").upper(),
+                 ev.get("impact", "").title(),
+                 ev.get("title", ""),
+                 ev.get("forecast") or "—",
+                 ev.get("previous") or "—"]
+        lines.append("  ".join(_C(c, w) for c, (_, w) in zip(cells, COLS)))
+    return title + "\n```\n" + header + "\n" + sep + "\n" + "\n".join(lines) + "\n```"
 
 
 def split_message(msg: str) -> list[str]:
@@ -147,4 +136,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() main()
+    main()
