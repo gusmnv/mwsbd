@@ -484,15 +484,96 @@ def results():
         beat = eps_e is not None and eps_a is not None and float(eps_a) >= float(eps_e)
         emoji, verdict = ("🟢", "BEAT") if beat else ("🔴", "MISS")
         fresh.append(
-            f"{emoji} {flag(sym)} **${sym}** — **{verdict}**\n"
-            f"   EPS: **{fmt_eps(eps_a)}** vs est {fmt_eps(eps_e)}\n"
-            f"   Revenue: **{fmt_money(rev_a)}** vs est {fmt_money(rev_e)}"
+            f"{emoji} **${sym}** — **{verdict}**\n"
+            f"   EPS: **{fmt_eps(eps_a)}** vs est {fmt_eps(eps_e)} ({pct_s(eps_a, eps_e)})\n"
+            f"   Revenue: **{fmt_money(rev_a)}** vs est {fmt_money(rev_e)} ({pct_s(rev_a, rev_e)})"
         )
     if fresh:
         send_chunked(["💰 **EARNINGS JUST REPORTED**", ""] + fresh)
     else:
         print("No new results above the cutoff.")
     save_json(REPORTED_FILE, sorted(reported)[-2000:])
+
+
+
+
+# ---- daily & weekly recap (actuals vs estimates) -------------------------------
+def pct_s(actual, est) -> str:
+    """Surprise percentage: +4.5% / -2.1% / —"""
+    try:
+        actual, est = float(actual), float(est)
+    except (TypeError, ValueError):
+        return "—"
+    if est == 0:
+        return "—"
+    p = (actual - est) / abs(est) * 100
+    return f"{'+' if p >= 0 else ''}{p:.1f}%"
+
+
+RECAP_COLS = [("COMPANY", 10, "l"), ("EPS ACTUAL", 10, "r"), ("EPS +/-", 8, "r"),
+              ("REVENUE", 10, "r"), ("REV +/-", 8, "r")]
+RECAP_WIDTH = sum(w for _, w, _ in RECAP_COLS) + len(GAP) * (len(RECAP_COLS) - 1)
+
+
+def recap_table_message(day_iso: str, entries: list[dict], mcaps: dict) -> str:
+    rows = sorted(entries, key=lambda e: -(mcaps.get(e.get("symbol")) or 0))
+    dt = date.fromisoformat(day_iso)
+    title = f"__**{dt.strftime('%A')}, {ordinal(dt.day)} {dt.strftime('%B')}**__"
+    header = GAP.join(str(h).center(w) for h, w, _ in RECAP_COLS)
+    sep = "─" * RECAP_WIDTH
+    lines = []
+    for e in rows:
+        cells = [f"${e.get('symbol', '?')}",
+                 fmt_eps(e.get("epsActual")),
+                 pct_s(e.get("epsActual"), e.get("epsEstimate")),
+                 fmt_money(e.get("revenueActual")),
+                 pct_s(e.get("revenueActual"), e.get("revenueEstimate"))]
+        lines.append(GAP.join(_cell(c, w, a) for c, (_, w, a) in zip(cells, RECAP_COLS)))
+    return title + "\n```\n" + header + "\n" + sep + "\n" + "\n".join(lines) + "\n```"
+
+
+def _reported_between(frm: date, to: date) -> list[dict]:
+    entries = [e for e in get_calendar(frm, to) if e.get("epsActual") is not None]
+    if not entries:
+        return []
+    mcaps = get_mcaps(sorted({e["symbol"] for e in entries if e.get("symbol")}))
+    return [e for e in entries if keep(e, mcaps.get(e.get("symbol")))], mcaps
+
+
+def recap():
+    """End of day: table of everything that reported today (ET)."""
+    from zoneinfo import ZoneInfo
+    from datetime import datetime as _dt
+    today_et = _dt.now(ZoneInfo("America/New_York")).date()
+    result = _reported_between(today_et, today_et)
+    if not result or not result[0]:
+        print("Nothing reported today.")
+        return
+    kept, mcaps = result
+    post_to_discord("**EARNINGS DAILY RECAP**")
+    time.sleep(1)
+    send_messages([recap_table_message(today_et.isoformat(),
+                                       [e for e in kept if e.get("date") == today_et.isoformat()],
+                                       mcaps)])
+
+
+def week_recap():
+    """Friday night: table of the whole week's results, grouped by day."""
+    from zoneinfo import ZoneInfo
+    from datetime import datetime as _dt
+    today_et = _dt.now(ZoneInfo("America/New_York")).date()
+    monday = today_et - timedelta(days=today_et.weekday())
+    result = _reported_between(monday, today_et)
+    if not result or not result[0]:
+        print("Nothing reported this week.")
+        return
+    kept, mcaps = result
+    by_day = defaultdict(list)
+    for e in kept:
+        by_day[e.get("date", "")].append(e)
+    post_to_discord("**EARNINGS WEEKLY RECAP**")
+    time.sleep(1)
+    send_messages([recap_table_message(day, by_day[day], mcaps) for day in sorted(by_day)])
 
 
 def main():
@@ -507,8 +588,12 @@ def main():
         today_mode()
     elif mode == "results":
         results()
+    elif mode == "recap":
+        recap()
+    elif mode == "weekrecap":
+        week_recap()
     else:
-        sys.exit(f"Unknown mode: {mode} (use 'preview', 'today' or 'results')")
+        sys.exit(f"Unknown mode: {mode} (use 'preview', 'today', 'results', 'recap' or 'weekrecap')")
 
 
 if __name__ == "__main__":
