@@ -229,39 +229,94 @@ def num_short(x, money=True) -> str:
 
 TIME_WORD = {"bmo": "Before open", "amc": "After close", "dmh": "In market"}
 
-
-def row_for(e: dict, mcap) -> str:
-    sym = f"${e.get('symbol', '?')}"
-    when = TIME_WORD.get(e.get("hour", ""), "—")
-    return (f"{sym:<10}{num_short(mcap):>8}{num_short(e.get('epsEstimate'), money=False):>9}"
-            f"{num_short(e.get('revenueEstimate')):>9}  {when}")
+# ---- table rendered as image (clean, quarterchart-style) ----------------------
+FONT_DIR = "/usr/share/fonts/truetype/dejavu"
 
 
-TABLE_HEADER = (f"{'COMPANY':<10}{'MCAP':>8}{'EPS EST':>9}{'REV EST':>9}  TIMING\n"
-                f"{'-'*10}{'-'*8}{'-'*9}{'-'*9}--{'-'*11}")
+def render_day_image(day_iso: str, entries: list[dict], mcaps: dict) -> bytes:
+    from PIL import Image, ImageDraw, ImageFont
+    import io
+
+    # order: Before open first, then in-market, then After close, unknown last;
+    # inside each group, biggest market cap first
+    session_order = {"bmo": 0, "dmh": 1, "amc": 2}
+    rows = sorted(entries, key=lambda e: (session_order.get(e.get("hour", ""), 3),
+                                          -(mcaps.get(e.get("symbol")) or 0)))
+    W = 1080
+    title_h, header_h, row_h, footer_h = 84, 56, 60, 44
+    H = title_h + header_h + row_h * len(rows) + footer_h
+
+    img = Image.new("RGB", (W, H), (255, 255, 255))
+    d = ImageDraw.Draw(img)
+    f_title = ImageFont.truetype(f"{FONT_DIR}/DejaVuSans-Bold.ttf", 34)
+    f_head  = ImageFont.truetype(f"{FONT_DIR}/DejaVuSans-Bold.ttf", 22)
+    f_cell  = ImageFont.truetype(f"{FONT_DIR}/DejaVuSans.ttf", 23)
+    f_tick  = ImageFont.truetype(f"{FONT_DIR}/DejaVuSans-Bold.ttf", 23)
+    f_ftr   = ImageFont.truetype(f"{FONT_DIR}/DejaVuSans-Bold.ttf", 17)
+
+    dt = date.fromisoformat(day_iso)
+    d.text((40, 24), dt.strftime("%A %m/%d"), font=f_title, fill=(20, 24, 31))
+
+    # column x anchors: ticker left; numbers right-aligned; timing right
+    X_TICK, X_MCAP, X_EPS, X_REV, X_TIME = 50, 460, 660, 880, 1040
+    y = title_h
+    d.rectangle([30, y, W - 30, y + header_h], fill=(246, 247, 249))
+    ty = y + 16
+    d.text((X_TICK, ty), "Company", font=f_head, fill=(55, 63, 75))
+    d.text((X_MCAP, ty), "Market cap", font=f_head, fill=(55, 63, 75), anchor="ra")
+    d.text((X_EPS, ty), "EPS est", font=f_head, fill=(55, 63, 75), anchor="ra")
+    d.text((X_REV, ty), "Revenue est", font=f_head, fill=(55, 63, 75), anchor="ra")
+    d.text((X_TIME, ty), "Timing", font=f_head, fill=(55, 63, 75), anchor="ra")
+
+    y += header_h
+    for i, e in enumerate(rows):
+        if i:
+            d.line([(30, y), (W - 30, y)], fill=(233, 236, 240), width=2)
+        cy = y + 16
+        sym = f"${e.get('symbol', '?')}"
+        d.text((X_TICK, cy), sym, font=f_tick, fill=(23, 92, 211))
+        d.text((X_MCAP, cy), fmt_money(mcaps.get(e.get("symbol"))), font=f_cell,
+               fill=(30, 34, 40), anchor="ra")
+        d.text((X_EPS, cy), fmt_eps(e.get("epsEstimate")), font=f_cell,
+               fill=(30, 34, 40), anchor="ra")
+        d.text((X_REV, cy), fmt_money(e.get("revenueEstimate")), font=f_cell,
+               fill=(30, 34, 40), anchor="ra")
+        d.text((X_TIME, cy), TIME_WORD.get(e.get("hour", ""), "—"), font=f_cell,
+               fill=(30, 34, 40), anchor="ra")
+        y += row_h
+
+    d.text((W // 2, H - 22), "MR WALL STREET  ·  @mrofwallstreet",
+           font=f_ftr, fill=(150, 158, 168), anchor="mm")
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
 
 
-def day_blocks(day_iso: str, entries: list[dict], mcaps: dict) -> list[str]:
-    """One Discord message (or more) per day: bold header + fenced table."""
-    d = date.fromisoformat(day_iso)
-    header = f"__**{d.strftime('%A, %B %d')}**__"
-    rows = [row_for(e, mcaps.get(e.get("symbol")))
-            for e in sorted(entries, key=lambda e: -(mcaps.get(e.get("symbol")) or 0))]
-    blocks, batch = [], []
-    for row in rows:
-        batch.append(row)
-        if sum(len(r) + 1 for r in batch) > 1700:  # keep under Discord limit
-            blocks.append(header + "\n```\n" + TABLE_HEADER + "\n" + "\n".join(batch) + "\n```")
-            header = ""  # only first block carries the day name
-            batch = []
-    if batch:
-        blocks.append((header + "\n" if header else "") +
-                      "```\n" + TABLE_HEADER + "\n" + "\n".join(batch) + "\n```")
-    return blocks
+def post_image(png: bytes, filename: str, content: str = ""):
+    """Post an image to the Discord webhook (multipart upload)."""
+    import uuid
+    boundary = uuid.uuid4().hex
+    payload = {"username": "Mr Wall Street — Earnings",
+               "content": content[:2000], "allowed_mentions": {"parse": []}}
+    body = (
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"payload_json\"\r\n"
+        f"Content-Type: application/json\r\n\r\n{json.dumps(payload)}\r\n"
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"files[0]\"; "
+        f"filename=\"{filename}\"\r\nContent-Type: image/png\r\n\r\n"
+    ).encode() + png + f"\r\n--{boundary}--\r\n".encode()
+    req = urllib.request.Request(
+        WEBHOOK, data=body,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
+                 "User-Agent": "MrWallStreetBot"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return r.status
 
 
-def build_table(entries: list[dict], title: str) -> list[str]:
-    """Returns a list of ready-to-send Discord messages."""
+def build_day_images(entries: list[dict]):
+    """Returns [(day_iso, png_bytes)] for kept entries, grouped by day."""
     if not entries:
         return []
     mcaps = get_mcaps(sorted({e["symbol"] for e in entries if e.get("symbol")}))
@@ -271,11 +326,7 @@ def build_table(entries: list[dict], title: str) -> list[str]:
     by_day = defaultdict(list)
     for e in kept:
         by_day[e.get("date", "")].append(e)
-
-    messages = [title]
-    for day in sorted(by_day):
-        messages.extend(day_blocks(day, by_day[day], mcaps))
-    return messages
+    return [(day, render_day_image(day, by_day[day], mcaps)) for day in sorted(by_day)]
 
 
 # ---- modes ----------------------------------------------------------------------
@@ -284,22 +335,28 @@ def preview():
     monday = today + timedelta(days=(7 - today.weekday()) % 7 or 7)
     friday = monday + timedelta(days=4)
     entries = get_calendar(monday, friday)
-    msgs = build_table(entries,
-        f"🗓️ **EARNINGS WEEK AHEAD** ({monday.strftime('%b %d')} – {friday.strftime('%b %d')})")
-    if msgs:
-        send_messages(msgs)
-    else:
+    images = build_day_images(entries)
+    if not images:
         print("Nothing above the cutoff next week.")
+        return
+    post_to_discord(f"🗓️ **EARNINGS WEEK AHEAD** ({monday.strftime('%b %d')} – {friday.strftime('%b %d')})")
+    time.sleep(1)
+    for day, png in images:
+        status = post_image(png, f"earnings-{day}.png")
+        print(f"Posted {day} (HTTP {status}).")
+        time.sleep(1)
 
 
 def today_mode():
     t = date.today()
     entries = [e for e in get_calendar(t, t) if e.get("date") == t.isoformat()]
-    msgs = build_table(entries, f"📌 **TODAY'S EARNINGS** — {t.strftime('%A, %B %d')}")
-    if msgs:
-        send_messages(msgs)
-    else:
+    images = build_day_images(entries)
+    if not images:
         print("No earnings above the cutoff today.")
+        return
+    for day, png in images:
+        status = post_image(png, f"earnings-{day}.png", content="📌 **TODAY'S EARNINGS**")
+        print(f"Posted {day} (HTTP {status}).")
 
 
 def results():
