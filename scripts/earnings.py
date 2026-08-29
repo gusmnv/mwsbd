@@ -365,14 +365,19 @@ def build_day_images(entries: list[dict]):
 
 
 
-# ---- text table (code block: full-width, PC-first) ----------------------------
-COLS = [("COMPANY", 11), ("MARKET CAP", 13), ("EPS ESTIMATE", 14),
-        ("REVENUE ESTIMATE", 18), ("TIMING", 13)]
-TABLE_WIDTH = sum(w for _, w in COLS) + 2 * (len(COLS) - 1)
+# ---- text table (code block, quarterchart-style alignment) --------------------
+# COMPANY left-aligned; numbers right-aligned; 4-space gaps
+COLS = [("COMPANY", 10, "l"), ("MARKET CAP", 10, "r"), ("EPS ESTIMATE", 12, "r"),
+        ("REVENUE ESTIMATE", 16, "r"), ("TIMING", 11, "r")]
+GAP = "    "
+TABLE_WIDTH = sum(w for _, w, _ in COLS) + len(GAP) * (len(COLS) - 1)
 
 
-def _C(s, w):
-    return str(s).center(w)
+def _cell(s, w, a):
+    s = str(s)
+    if len(s) > w:
+        s = s[: w - 1] + "…"
+    return s.ljust(w) if a == "l" else s.rjust(w)
 
 
 def day_table_message(day_iso: str, entries: list[dict], mcaps: dict) -> str:
@@ -381,7 +386,7 @@ def day_table_message(day_iso: str, entries: list[dict], mcaps: dict) -> str:
                                           -(mcaps.get(e.get("symbol")) or 0)))
     dt = date.fromisoformat(day_iso)
     title = f"__**{dt.strftime('%A')}, {ordinal(dt.day)} {dt.strftime('%B')}**__"
-    header = "  ".join(_C(h, w) for h, w in COLS)
+    header = GAP.join(_cell(h, w, a) for h, w, a in COLS)
     sep = "─" * TABLE_WIDTH
     lines = []
     for e in rows:
@@ -390,7 +395,7 @@ def day_table_message(day_iso: str, entries: list[dict], mcaps: dict) -> str:
                  fmt_eps(e.get("epsEstimate")),
                  fmt_money(e.get("revenueEstimate")),
                  TIME_WORD.get(e.get("hour", ""), "TBD")]
-        lines.append("  ".join(_C(c, w) for c, (_, w) in zip(cells, COLS)))
+        lines.append(GAP.join(_cell(c, w, a) for c, (_, w, a) in zip(cells, COLS)))
     return title + "\n```\n" + header + "\n" + sep + "\n" + "\n".join(lines) + "\n```"
 
 
