@@ -365,80 +365,68 @@ def build_day_images(entries: list[dict]):
 
 
 
-# ---- text table (code block, <=40 chars wide so phones never wrap) ------------
-W_SYM, W_MC, W_EPS, W_REV = 10, 8, 8, 8
-TABLE_WIDTH = W_SYM + W_MC + W_EPS + W_REV + 3 * 2
+# ---- text table (code block: full-width, PC-first) ----------------------------
+COLS = [("COMPANY", 11), ("MARKET CAP", 13), ("EPS ESTIMATE", 14),
+        ("REVENUE ESTIMATE", 18), ("TIMING", 13)]
+TABLE_WIDTH = sum(w for _, w in COLS) + 2 * (len(COLS) - 1)
 
 
 def _C(s, w):
-    return str(s)[:w].center(w)
-
-
-def _L(s, w):
-    return str(s)[:w].ljust(w)
-
-
-def money_s(x) -> str:
-    if x is None:
-        return "—"
-    try:
-        x = float(x)
-    except (TypeError, ValueError):
-        return "—"
-    a = abs(x)
-    if a >= 1e12:
-        return f"${x/1e12:.2f}T"
-    if a >= 1e9:
-        return f"${x/1e9:.1f}B"
-    if a >= 1e6:
-        return f"${x/1e6:.0f}M"
-    return f"${x:,.0f}"
-
-
-def eps_s(x) -> str:
-    if x is None:
-        return "—"
-    try:
-        x = float(x)
-    except (TypeError, ValueError):
-        return "—"
-    return f"${x:.2f}" if x >= 0 else f"-${abs(x):.2f}"
-
-
-def _row(e, mcaps) -> str:
-    return (_L(f"${e.get('symbol', '?')}", W_SYM) + "  "
-            + _C(money_s(mcaps.get(e.get("symbol"))), W_MC) + "  "
-            + _C(eps_s(e.get("epsEstimate")), W_EPS) + "  "
-            + _C(money_s(e.get("revenueEstimate")), W_REV))
-
-
-SECTION_NAME = {"bmo": "BEFORE OPEN", "dmh": "IN MARKET", "amc": "AFTER CLOSE", "": "TIME TBD"}
+    return str(s).center(w)
 
 
 def day_table_message(day_iso: str, entries: list[dict], mcaps: dict) -> str:
+    session_order = {"bmo": 0, "dmh": 1, "amc": 2}
+    rows = sorted(entries, key=lambda e: (session_order.get(e.get("hour", ""), 3),
+                                          -(mcaps.get(e.get("symbol")) or 0)))
     dt = date.fromisoformat(day_iso)
     title = f"__**{dt.strftime('%A')}, {ordinal(dt.day)} {dt.strftime('%B')}**__"
-    h1 = _L("", W_SYM) + "  " + _C("MARKET", W_MC) + "  " + _C("EPS", W_EPS) + "  " + _C("REVENUE", W_REV)
-    h2 = _L("COMPANY", W_SYM) + "  " + _C("CAP", W_MC) + "  " + _C("ESTIMATE", W_EPS) + "  " + _C("ESTIMATE", W_REV)
+    header = "  ".join(_C(h, w) for h, w in COLS)
     sep = "-" * TABLE_WIDTH
+    lines = []
+    for e in rows:
+        cells = [f"${e.get('symbol', '?')}",
+                 fmt_money(mcaps.get(e.get("symbol"))),
+                 fmt_eps(e.get("epsEstimate")),
+                 fmt_money(e.get("revenueEstimate")),
+                 TIME_WORD.get(e.get("hour", ""), "TBD")]
+        lines.append("  ".join(_C(c, w) for c, (_, w) in zip(cells, COLS)))
+    return title + "\n```\n" + header + "\n" + sep + "\n" + "\n".join(lines) + "\n```"
 
-    session_order = {"bmo": 0, "dmh": 1, "amc": 2}
-    groups = defaultdict(list)
-    for e in entries:
-        groups[e.get("hour", "") if e.get("hour", "") in session_order else ""].append(e)
 
-    lines = [h1, h2, sep]
-    first = True
-    for key in ["bmo", "dmh", "amc", ""]:
-        if not groups.get(key):
-            continue
-        if not first:
-            lines.append("")
-        first = False
-        lines.append(("— " + SECTION_NAME[key] + " —").center(TABLE_WIDTH))
-        for e in sorted(groups[key], key=lambda e: -(mcaps.get(e.get("symbol")) or 0)):
-            lines.append(_row(e, mcaps))
-    return title + "\n```\n" + "\n".join(lines) + "\n```"
+def build_day_messages(entries: list[dict]) -> list[str]:
+    if not entries:
+        return []
+    mcaps = get_mcaps(sorted({e["symbol"] for e in entries if e.get("symbol")}))
+    kept = [e for e in entries if keep(e, mcaps.get(e.get("symbol")))]
+    if not kept:
+        return []
+    by_day = defaultdict(list)
+    for e in kept:
+        by_day[e.get("date", "")].append(e)
+    msgs = []
+    for day in sorted(by_day):
+        msgs.extend(split_table_message(day_table_message(day, by_day[day], mcaps)))
+    return msgs
+
+
+def split_table_message(msg: str) -> list[str]:
+    """Split an over-long day table into <=1900-char chunks, repeating the header."""
+    if len(msg) <= 1900:
+        return [msg]
+    head, _, body = msg.partition("```\n")
+    body = body.rsplit("```", 1)[0]
+    lines = body.split("\n")
+    header, sep, rows = lines[0], lines[1], [r for r in lines[2:] if r.strip()]
+    out, batch, first = [], [], True
+    for row in rows:
+        batch.append(row)
+        if sum(len(r) + 1 for r in batch) > 1500:
+            out.append((head if first else "") + "```\n" + header + "\n" + sep + "\n" + "\n".join(batch) + "\n```")
+            first, batch = False, []
+    if batch:
+        out.append((head if first else "") + "```\n" + header + "\n" + sep + "\n" + "\n".join(batch) + "\n```")
+    return out
 
 
 # ---- modes ----------------------------------------------------------------------
