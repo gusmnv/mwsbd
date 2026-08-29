@@ -1,9 +1,10 @@
 """
 Mr Wall Street — #economic-data bot
-Sunday: posts the week's economic calendar as one clean table image per day.
-Source: free ForexFactory weekly feed (times are US Eastern).
+Sunday: posts the week's economic calendar as clean centered text tables
+(code blocks — they scroll horizontally on mobile, never wrap).
+Source: free ForexFactory weekly feed (times are US Eastern / New York).
 
-Columns: Time (ET) · Cur · Importance · Event · Forecast · Previous
+Columns: TIME (ET) · CUR · IMPACT · EVENT · FORECAST · PREVIOUS
 Filter: High + Medium impact, ALL currencies.
 
 Required env var:
@@ -18,30 +19,10 @@ import time
 import urllib.request
 from collections import defaultdict
 from datetime import datetime
-from pathlib import Path
 
 FEED_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 WEBHOOK = os.environ.get("DISCORD_WEBHOOK_ECONOMIC_DATA", "").strip()
 IMPACTS = {i.strip().title() for i in os.environ.get("ECON_IMPACTS", "High,Medium").split(",")}
-
-DEJAVU = "/usr/share/fonts/truetype/dejavu"
-PLEX = Path(__file__).resolve().parent.parent / "fonts" / "IBMPlexSans.ttf"
-
-IMPACT_COLOR = {"High": (200, 42, 42), "Medium": (223, 138, 21), "Low": (150, 158, 168)}
-
-
-def _font(size: int, weight: int):
-    from PIL import ImageFont
-    if PLEX.exists():
-        try:
-            f = ImageFont.truetype(str(PLEX), size)
-            f.set_variation_by_axes([weight, 100])  # [Weight, Width]
-            return f
-        except Exception:
-            pass
-    name = "DejaVuSans-Bold.ttf" if weight >= 600 else "DejaVuSans.ttf"
-    from PIL import ImageFont
-    return ImageFont.truetype(f"{DEJAVU}/{name}", size)
 
 
 def ordinal(n: int) -> str:
@@ -57,13 +38,13 @@ def fetch_events():
 
 
 def parse(events):
-    """-> {date: [(datetime_et, event_dict)]} filtered by impact."""
+    """-> {date: [(datetime_et, event_dict)]} filtered by impact, sorted by time."""
     by_day = defaultdict(list)
     for ev in events:
         if ev.get("impact", "").title() not in IMPACTS:
             continue
         try:
-            dt = datetime.fromisoformat(ev["date"])  # already US Eastern
+            dt = datetime.fromisoformat(ev["date"])  # feed times are US Eastern
         except (KeyError, ValueError):
             continue
         by_day[dt.date()].append((dt, ev))
@@ -72,81 +53,67 @@ def parse(events):
     return by_day
 
 
-def render_day_image(day, items) -> bytes:
-    from PIL import Image, ImageDraw
-    import io
-
-    W = 1280
-    title_h, header_h, row_h, bottom_pad = 92, 58, 56, 24
-    H = title_h + header_h + row_h * len(items) + bottom_pad
-
-    img = Image.new("RGB", (W, H), (255, 255, 255))
-    d = ImageDraw.Draw(img)
-    f_title = _font(36, 700)
-    f_head = _font(20, 700)
-    f_cell = _font(21, 400)
-    f_evt = _font(21, 600)
-
-    d.text((40, 26), f"{day.strftime('%A')}, {ordinal(day.day)} {day.strftime('%B')}",
-           font=f_title, fill=(17, 21, 28))
-    d.text((W - 40, 44), "All times ET (New York)", font=_font(18, 400),
-           fill=(120, 128, 138), anchor="ra")
-
-    X_TIME, X_CUR, X_IMP, X_EVT, X_FC, X_PREV = 50, 165, 250, 380, 1120, 1240
-    y = title_h
-    d.rounded_rectangle([30, y, W - 30, y + header_h], radius=10, fill=(246, 247, 249))
-    ty = y + 17
-    d.text((X_TIME, ty), "Time", font=f_head, fill=(31, 41, 55))
-    d.text((X_CUR, ty), "Cur", font=f_head, fill=(31, 41, 55))
-    d.text((X_IMP, ty), "Impact", font=f_head, fill=(31, 41, 55))
-    d.text((X_EVT, ty), "Event", font=f_head, fill=(31, 41, 55))
-    d.text((X_FC, ty), "Forecast", font=f_head, fill=(31, 41, 55), anchor="ra")
-    d.text((X_PREV, ty), "Previous", font=f_head, fill=(31, 41, 55), anchor="ra")
-
-    y += header_h
-    for i, (dt, ev) in enumerate(items):
-        if i:
-            d.line([(30, y), (W - 30, y)], fill=(209, 215, 223), width=2)
-        cy = y + 15
-        t = dt.strftime("%-I:%M%p").lower() if dt.hour or dt.minute else "All day"
-        d.text((X_TIME, cy), t, font=f_cell, fill=(30, 34, 40))
-        d.text((X_CUR, cy), ev.get("country", "").upper(), font=f_evt, fill=(30, 34, 40))
-        imp = ev.get("impact", "").title()
-        d.text((X_IMP, cy), imp, font=f_evt, fill=IMPACT_COLOR.get(imp, (30, 34, 40)))
-        title = ev.get("title", "")
-        if len(title) > 52:
-            title = title[:51] + "…"
-        d.text((X_EVT, cy), title, font=f_evt, fill=(17, 21, 28))
-        d.text((X_FC, cy), str(ev.get("forecast") or "—"), font=f_cell,
-               fill=(30, 34, 40), anchor="ra")
-        d.text((X_PREV, cy), str(ev.get("previous") or "—"), font=f_cell,
-               fill=(30, 34, 40), anchor="ra")
-        y += row_h
-
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return buf.getvalue()
+W_T, W_C, W_I, W_F, W_P = 7, 3, 6, 8, 8
+TABLE_WIDTH = W_T + W_C + W_I + W_F + W_P + 4 * 2
 
 
-def post_image(png: bytes, filename: str, content: str = ""):
-    import uuid
-    boundary = uuid.uuid4().hex
-    payload = {"username": "Mr Wall Street — Markets",
-               "content": content[:2000], "allowed_mentions": {"parse": []}}
-    body = (
-        f"--{boundary}\r\nContent-Disposition: form-data; name=\"payload_json\"\r\n"
-        f"Content-Type: application/json\r\n\r\n{json.dumps(payload)}\r\n"
-        f"--{boundary}\r\nContent-Disposition: form-data; name=\"files[0]\"; "
-        f"filename=\"{filename}\"\r\nContent-Type: image/png\r\n\r\n"
-    ).encode() + png + f"\r\n--{boundary}--\r\n".encode()
-    req = urllib.request.Request(
-        WEBHOOK, data=body,
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
-                 "User-Agent": "MrWallStreetBot"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return r.status
+def _C(s, w):
+    s = str(s)
+    if len(s) > w:
+        s = s[: w - 1] + "…"
+    return s.center(w)
+
+
+def _L(s, w):
+    s = str(s)
+    if len(s) > w:
+        s = s[: w - 1] + "…"
+    return s.ljust(w)
+
+
+def day_table_message(day, items) -> str:
+    """Two lines per event, <=40 chars wide so phones never wrap:
+       time/cur/impact/forecast/previous row + indented event-name row."""
+    title = (f"__**{day.strftime('%A')}, {ordinal(day.day)} {day.strftime('%B')}**__"
+             f"  ·  times ET (NY)")
+    header = (_L("TIME", W_T) + "  " + _L("CUR", W_C) + "  " + _C("IMPACT", W_I)
+              + "  " + _C("FORECAST", W_F) + "  " + _C("PREV", W_P))
+    sep = "-" * TABLE_WIDTH
+    lines = [header, sep]
+    for dt, ev in items:
+        t = dt.strftime("%-I:%M%p").lower() if (dt.hour or dt.minute) else "All day"
+        lines.append(_L(t, W_T) + "  " + _L(ev.get("country", "").upper(), W_C) + "  "
+                     + _C(ev.get("impact", "").title(), W_I) + "  "
+                     + _C(ev.get("forecast") or "—", W_F) + "  "
+                     + _C(ev.get("previous") or "—", W_P))
+        lines.append("  " + str(ev.get("title", ""))[:38])
+        lines.append("")
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return title + "\n```\n" + "\n".join(lines) + "\n```"
+
+
+def split_message(msg: str) -> list[str]:
+    """Split an over-long day table into <=1900-char chunks, repeating the fence."""
+    if len(msg) <= 1900:
+        return [msg]
+    head, _, body = msg.partition("```\n")
+    body = body.rsplit("```", 1)[0]
+    lines = body.split("\n")
+    header, sep, rows = lines[0], lines[1], lines[2:]
+    out, batch = [], []
+    first = True
+    for row in rows:
+        batch.append(row)
+        if sum(len(r) + 1 for r in batch) > 1500:
+            prefix = head if first else ""
+            out.append(prefix + "```\n" + header + "\n" + sep + "\n" + "\n".join(batch) + "\n```")
+            first = False
+            batch = []
+    if batch:
+        prefix = head if first else ""
+        out.append(prefix + "```\n" + header + "\n" + sep + "\n" + "\n".join(batch) + "\n```")
+    return out
 
 
 def post_text(content: str):
@@ -170,14 +137,14 @@ def main():
         return
     days = sorted(by_day)
     post_text(f"📅 **ECONOMIC CALENDAR — WEEK AHEAD** "
-              f"({days[0].strftime('%b %d')} – {days[-1].strftime('%b %d')})")
+              f"({days[0].strftime('%b %d')} – {days[-1].strftime('%b %d')})  ·  All times ET (New York)")
     time.sleep(1)
     for day in days:
-        png = render_day_image(day, by_day[day])
-        status = post_image(png, f"econ-{day.isoformat()}.png")
-        print(f"Posted {day} (HTTP {status}).")
-        time.sleep(1)
+        for chunk in split_message(day_table_message(day, by_day[day])):
+            status = post_text(chunk)
+            print(f"Posted {day} chunk (HTTP {status}).")
+            time.sleep(1)
 
 
 if __name__ == "__main__":
-    main()
+    main() main()
