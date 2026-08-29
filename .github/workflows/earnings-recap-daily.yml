@@ -1,0 +1,21 @@
+name: earnings-recap-daily
+
+on:
+  schedule:
+    # 01:00 UTC Tue-Sat = 21:00 ET Mon-Fri — after the after-hours reports are in
+    - cron: "0 1 * * 2-6"
+  workflow_dispatch: {}
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Post daily earnings recap
+        env:
+          DISCORD_WEBHOOK_STOCK_EARNINGS: ${{ secrets.DISCORD_WEBHOOK_STOCK_EARNINGS }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+        run: python scripts/earnings.py recap
