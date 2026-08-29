@@ -1,0 +1,20 @@
+name: economic-today
+
+on:
+  schedule:
+    # 04:05 UTC = 00:05 ET — start of each ET day, Mon-Sat (Sat catches Friday-night Asia)
+    - cron: "5 4 * * 1-6"
+  workflow_dispatch: {}
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Post today's economic events
+        env:
+          DISCORD_WEBHOOK_ECONOMIC_DATA: ${{ secrets.DISCORD_WEBHOOK_ECONOMIC_DATA }}
+        run: python scripts/economic_data.py today
