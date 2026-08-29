@@ -444,7 +444,7 @@ def preview():
     if not msgs:
         print("Nothing above the cutoff next week.")
         return
-    post_to_discord(f"🗓️ **EARNINGS WEEK AHEAD** ({monday.strftime('%b %d')} – {friday.strftime('%b %d')})")
+    post_to_discord("**EARNINGS WEEK AHEAD**")
     time.sleep(1)
     send_messages(msgs)
 
@@ -456,7 +456,7 @@ def today_mode():
     if not msgs:
         print("No earnings above the cutoff today.")
         return
-    post_to_discord("📌 **TODAY'S EARNINGS**")
+    post_to_discord("**TODAY'S EARNINGS**")
     time.sleep(1)
     send_messages(msgs)
 
