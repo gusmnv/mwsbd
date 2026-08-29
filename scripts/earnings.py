@@ -386,7 +386,7 @@ def day_table_message(day_iso: str, entries: list[dict], mcaps: dict) -> str:
                                           -(mcaps.get(e.get("symbol")) or 0)))
     dt = date.fromisoformat(day_iso)
     title = f"__**{dt.strftime('%A')}, {ordinal(dt.day)} {dt.strftime('%B')}**__"
-    header = GAP.join(_cell(h, w, a) for h, w, a in COLS)
+    header = GAP.join(str(h).center(w) for h, w, _ in COLS)
     sep = "─" * TABLE_WIDTH
     lines = []
     for e in rows:
