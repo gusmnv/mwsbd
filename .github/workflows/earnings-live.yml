@@ -1,0 +1,43 @@
+name: earnings-live
+
+on:
+  schedule:
+    # Live sessions (UTC), Mon-Fri:
+    # 11:00 UTC = 07:00 ET  → pre-market session (2h10)
+    # 20:00 UTC = 16:00 ET  → after-hours session (2h10)
+    - cron: "0 11 * * 1-5"
+    - cron: "0 20 * * 1-5"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: earnings-live
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 140
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Live earnings watch (EDGAR + Finnhub)
+        env:
+          DISCORD_WEBHOOK_STOCK_EARNINGS: ${{ secrets.DISCORD_WEBHOOK_STOCK_EARNINGS }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          LIVE_MINUTES: "130"
+          MIN_MCAP_B: "5"
+        run: python scripts/earnings_live.py
+      - name: Save state
+        if: always()
+        run: |
+          git config user.name  "mrwallstreet-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git pull --rebase || true
+          git add state/ || true
+          git diff --cached --quiet || git commit -m "chore: update live earnings state"
+          git push || true
