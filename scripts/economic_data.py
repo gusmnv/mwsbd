@@ -53,10 +53,12 @@ def parse(events):
     return by_day
 
 
-# TIME/CURRENCY/IMPACT/EVENT left-aligned; FORECAST/PREVIOUS right-aligned
-HEADERS = [("TIME", "l"), ("CURRENCY", "l"), ("IMPACT", "l"),
-           ("EVENT", "l"), ("FORECAST", "r"), ("PREVIOUS", "r")]
+# Fixed column widths (same for every day so all tables share the same right edge)
+# headers centered; text values left-aligned; numeric values right-aligned
+COLS = [("TIME", 10, "l"), ("CURRENCY", 8, "l"), ("IMPACT", 6, "l"),
+        ("EVENT", 34, "l"), ("FORECAST", 8, "r"), ("PREVIOUS", 8, "r")]
 GAP = "    "
+TABLE_WIDTH = sum(w for _, w, _ in COLS) + len(GAP) * (len(COLS) - 1)
 
 
 def _cell(s, w, a):
@@ -77,13 +79,12 @@ def _cells(dt, ev):
 
 
 def day_table_message(day, items) -> str:
-    """Dynamic column widths; left-aligned text, right-aligned numbers."""
     title = f"__**{day.strftime('%A')}, {ordinal(day.day)} {day.strftime('%B')}**__"
-    rows = [_cells(dt, ev) for dt, ev in items]
-    widths = [max(len(h), *(len(r[i]) for r in rows)) for i, (h, _) in enumerate(HEADERS)]
-    header = GAP.join(_cell(h, w, a) for (h, a), w in zip(HEADERS, widths))
-    sep = "─" * (sum(widths) + len(GAP) * (len(widths) - 1))
-    lines = [GAP.join(_cell(c, w, a) for c, w, (_, a) in zip(r, widths, HEADERS)) for r in rows]
+    header = GAP.join(str(h).center(w) for h, w, _ in COLS)
+    sep = "─" * TABLE_WIDTH
+    lines = []
+    for dt, ev in items:
+        lines.append(GAP.join(_cell(c, w, a) for c, (_, w, a) in zip(_cells(dt, ev), COLS)))
     return title + "\n```\n" + header + "\n" + sep + "\n" + "\n".join(lines) + "\n```"
 
 
