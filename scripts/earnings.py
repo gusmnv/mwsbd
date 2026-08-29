@@ -193,7 +193,10 @@ def get_calendar(frm: date, to: date) -> list[dict]:
 
 
 def keep(entry: dict, mcap) -> bool:
-    """Filter: mcap >= cutoff, or unknown mcap but revenue est >= $1B."""
+    """Filter: needs at least one estimate; mcap >= cutoff, or unknown mcap
+    but revenue est >= $1B."""
+    if entry.get("epsEstimate") is None and entry.get("revenueEstimate") is None:
+        return False  # nothing to show — skip
     if mcap is not None:
         return mcap >= MIN_MCAP_B * 1e9
     rev = entry.get("revenueEstimate")
@@ -230,11 +233,40 @@ def num_short(x, money=True) -> str:
 TIME_WORD = {"bmo": "Before open", "amc": "After close", "dmh": "In market"}
 
 # ---- table rendered as image (clean, quarterchart-style) ----------------------
-FONT_DIR = "/usr/share/fonts/truetype/dejavu"
+DEJAVU = "/usr/share/fonts/truetype/dejavu"
+PLEX = Path(__file__).resolve().parent.parent / "fonts" / "IBMPlexSans.ttf"
+
+
+def _font(size: int, weight: int):
+    """IBM Plex Sans at the given weight; DejaVu fallback."""
+    from PIL import ImageFont
+    if PLEX.exists():
+        try:
+            f = ImageFont.truetype(str(PLEX), size)
+            f.set_variation_by_axes([weight, 100])  # [Weight, Width]
+            return f
+        except Exception:
+            pass
+    name = "DejaVuSans-Bold.ttf" if weight >= 600 else "DejaVuSans.ttf"
+    return ImageFont.truetype(f"{DEJAVU}/{name}", size)
+
+
+def ordinal(n: int) -> str:
+    if 11 <= n % 100 <= 13:
+        return f"{n}th"
+    return f"{n}" + {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+
+
+TIME_PILL = {  # label, pill background, text color
+    "bmo": ("Before open", (219, 234, 254), (29, 78, 216)),
+    "amc": ("After close", (30, 41, 59), (255, 255, 255)),
+    "dmh": ("In market", (254, 243, 199), (146, 100, 8)),
+    "":    ("TBD", (238, 240, 243), (110, 118, 129)),
+}
 
 
 def render_day_image(day_iso: str, entries: list[dict], mcaps: dict) -> bytes:
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw
     import io
 
     # order: Before open first, then in-market, then After close, unknown last;
@@ -243,36 +275,36 @@ def render_day_image(day_iso: str, entries: list[dict], mcaps: dict) -> bytes:
     rows = sorted(entries, key=lambda e: (session_order.get(e.get("hour", ""), 3),
                                           -(mcaps.get(e.get("symbol")) or 0)))
     W = 1180
-    title_h, header_h, row_h, footer_h = 84, 56, 60, 44
-    H = title_h + header_h + row_h * len(rows) + footer_h
+    title_h, header_h, row_h, bottom_pad = 92, 58, 62, 24
+    H = title_h + header_h + row_h * len(rows) + bottom_pad
 
     img = Image.new("RGB", (W, H), (255, 255, 255))
     d = ImageDraw.Draw(img)
-    f_title = ImageFont.truetype(f"{FONT_DIR}/DejaVuSans-Bold.ttf", 34)
-    f_head  = ImageFont.truetype(f"{FONT_DIR}/DejaVuSans-Bold.ttf", 22)
-    f_cell  = ImageFont.truetype(f"{FONT_DIR}/DejaVuSans.ttf", 23)
-    f_tick  = ImageFont.truetype(f"{FONT_DIR}/DejaVuSans-Bold.ttf", 23)
-    f_ftr   = ImageFont.truetype(f"{FONT_DIR}/DejaVuSans-Bold.ttf", 17)
+    f_title = _font(36, 700)
+    f_head  = _font(21, 600)
+    f_cell  = _font(23, 400)
+    f_tick  = _font(23, 700)
+    f_pill  = _font(18, 600)
 
     dt = date.fromisoformat(day_iso)
-    d.text((40, 24), dt.strftime("%A %m/%d"), font=f_title, fill=(20, 24, 31))
+    d.text((40, 26), f"{dt.strftime('%A')}, {ordinal(dt.day)} {dt.strftime('%B')}",
+           font=f_title, fill=(17, 21, 28))
 
-    # column x anchors: ticker left; numbers right-aligned; timing right
     X_TICK, X_MCAP, X_EPS, X_REV, X_TIME = 50, 430, 660, 950, 1140
     y = title_h
-    d.rectangle([30, y, W - 30, y + header_h], fill=(246, 247, 249))
-    ty = y + 16
-    d.text((X_TICK, ty), "Company", font=f_head, fill=(55, 63, 75))
-    d.text((X_MCAP, ty), "Market cap", font=f_head, fill=(55, 63, 75), anchor="ra")
-    d.text((X_EPS, ty), "EPS estimate", font=f_head, fill=(55, 63, 75), anchor="ra")
-    d.text((X_REV, ty), "Revenue estimate", font=f_head, fill=(55, 63, 75), anchor="ra")
-    d.text((X_TIME, ty), "Timing", font=f_head, fill=(55, 63, 75), anchor="ra")
+    d.rounded_rectangle([30, y, W - 30, y + header_h], radius=10, fill=(246, 247, 249))
+    ty = y + 17
+    d.text((X_TICK, ty), "Company", font=f_head, fill=(87, 96, 108))
+    d.text((X_MCAP, ty), "Market cap", font=f_head, fill=(87, 96, 108), anchor="ra")
+    d.text((X_EPS, ty), "EPS estimate", font=f_head, fill=(87, 96, 108), anchor="ra")
+    d.text((X_REV, ty), "Revenue estimate", font=f_head, fill=(87, 96, 108), anchor="ra")
+    d.text((X_TIME, ty), "Timing", font=f_head, fill=(87, 96, 108), anchor="ra")
 
     y += header_h
     for i, e in enumerate(rows):
         if i:
-            d.line([(30, y), (W - 30, y)], fill=(233, 236, 240), width=2)
-        cy = y + 16
+            d.line([(30, y), (W - 30, y)], fill=(236, 239, 243), width=2)
+        cy = y + 17
         sym = f"${e.get('symbol', '?')}"
         d.text((X_TICK, cy), sym, font=f_tick, fill=(23, 92, 211))
         d.text((X_MCAP, cy), fmt_money(mcaps.get(e.get("symbol"))), font=f_cell,
@@ -281,12 +313,12 @@ def render_day_image(day_iso: str, entries: list[dict], mcaps: dict) -> bytes:
                fill=(30, 34, 40), anchor="ra")
         d.text((X_REV, cy), fmt_money(e.get("revenueEstimate")), font=f_cell,
                fill=(30, 34, 40), anchor="ra")
-        d.text((X_TIME, cy), TIME_WORD.get(e.get("hour", ""), "—"), font=f_cell,
-               fill=(30, 34, 40), anchor="ra")
+        label, bg, fg = TIME_PILL.get(e.get("hour", ""), TIME_PILL[""])
+        tw = d.textlength(label, font=f_pill)
+        px1, px0 = X_TIME, X_TIME - tw - 28
+        d.rounded_rectangle([px0, y + 13, px1, y + 46], radius=17, fill=bg)
+        d.text(((px0 + px1) / 2, y + 20), label, font=f_pill, fill=fg, anchor="ma")
         y += row_h
-
-    d.text((W // 2, H - 22), "MR WALL STREET  ·  @mrofwallstreet",
-           font=f_ftr, fill=(150, 158, 168), anchor="mm")
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")
