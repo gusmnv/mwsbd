@@ -363,35 +363,109 @@ def build_day_images(entries: list[dict]):
             for day in sorted(by_day)]
 
 
+
+
+# ---- text table (code block, <=40 chars wide so phones never wrap) ------------
+W_SYM, W_MC, W_EPS, W_REV = 10, 8, 8, 8
+TABLE_WIDTH = W_SYM + W_MC + W_EPS + W_REV + 3 * 2
+
+
+def _C(s, w):
+    return str(s)[:w].center(w)
+
+
+def _L(s, w):
+    return str(s)[:w].ljust(w)
+
+
+def money_s(x) -> str:
+    if x is None:
+        return "—"
+    try:
+        x = float(x)
+    except (TypeError, ValueError):
+        return "—"
+    a = abs(x)
+    if a >= 1e12:
+        return f"${x/1e12:.2f}T"
+    if a >= 1e9:
+        return f"${x/1e9:.1f}B"
+    if a >= 1e6:
+        return f"${x/1e6:.0f}M"
+    return f"${x:,.0f}"
+
+
+def eps_s(x) -> str:
+    if x is None:
+        return "—"
+    try:
+        x = float(x)
+    except (TypeError, ValueError):
+        return "—"
+    return f"${x:.2f}" if x >= 0 else f"-${abs(x):.2f}"
+
+
+def _row(e, mcaps) -> str:
+    return (_L(f"${e.get('symbol', '?')}", W_SYM) + "  "
+            + _C(money_s(mcaps.get(e.get("symbol"))), W_MC) + "  "
+            + _C(eps_s(e.get("epsEstimate")), W_EPS) + "  "
+            + _C(money_s(e.get("revenueEstimate")), W_REV))
+
+
+SECTION_NAME = {"bmo": "BEFORE OPEN", "dmh": "IN MARKET", "amc": "AFTER CLOSE", "": "TIME TBD"}
+
+
+def day_table_message(day_iso: str, entries: list[dict], mcaps: dict) -> str:
+    dt = date.fromisoformat(day_iso)
+    title = f"__**{dt.strftime('%A')}, {ordinal(dt.day)} {dt.strftime('%B')}**__"
+    h1 = _L("", W_SYM) + "  " + _C("MARKET", W_MC) + "  " + _C("EPS", W_EPS) + "  " + _C("REVENUE", W_REV)
+    h2 = _L("COMPANY", W_SYM) + "  " + _C("CAP", W_MC) + "  " + _C("ESTIMATE", W_EPS) + "  " + _C("ESTIMATE", W_REV)
+    sep = "-" * TABLE_WIDTH
+
+    session_order = {"bmo": 0, "dmh": 1, "amc": 2}
+    groups = defaultdict(list)
+    for e in entries:
+        groups[e.get("hour", "") if e.get("hour", "") in session_order else ""].append(e)
+
+    lines = [h1, h2, sep]
+    first = True
+    for key in ["bmo", "dmh", "amc", ""]:
+        if not groups.get(key):
+            continue
+        if not first:
+            lines.append("")
+        first = False
+        lines.append(("— " + SECTION_NAME[key] + " —").center(TABLE_WIDTH))
+        for e in sorted(groups[key], key=lambda e: -(mcaps.get(e.get("symbol")) or 0)):
+            lines.append(_row(e, mcaps))
+    return title + "\n```\n" + "\n".join(lines) + "\n```"
+
+
 # ---- modes ----------------------------------------------------------------------
 def preview():
     today = date.today()
     monday = today + timedelta(days=(7 - today.weekday()) % 7 or 7)
     friday = monday + timedelta(days=4)
     entries = get_calendar(monday, friday)
-    images = build_day_images(entries)
-    if not images:
+    msgs = build_day_messages(entries)
+    if not msgs:
         print("Nothing above the cutoff next week.")
         return
     post_to_discord(f"🗓️ **EARNINGS WEEK AHEAD** ({monday.strftime('%b %d')} – {friday.strftime('%b %d')})")
     time.sleep(1)
-    for day, png, tickers in images:
-        status = post_image(png, f"earnings-{day}.png", content=tickers)
-        print(f"Posted {day} (HTTP {status}).")
-        time.sleep(1)
+    send_messages(msgs)
 
 
 def today_mode():
     t = date.today()
     entries = [e for e in get_calendar(t, t) if e.get("date") == t.isoformat()]
-    images = build_day_images(entries)
-    if not images:
+    msgs = build_day_messages(entries)
+    if not msgs:
         print("No earnings above the cutoff today.")
         return
-    for day, png, tickers in images:
-        status = post_image(png, f"earnings-{day}.png",
-                            content=f"📌 **TODAY'S EARNINGS**\n{tickers}")
-        print(f"Posted {day} (HTTP {status}).")
+    post_to_discord("📌 **TODAY'S EARNINGS**")
+    time.sleep(1)
+    send_messages(msgs)
 
 
 def results():
