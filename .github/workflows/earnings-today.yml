@@ -1,0 +1,37 @@
+name: earnings-today
+
+on:
+  schedule:
+    # 10:00 UTC = 14:00 Dubai = 06:00 New York, Mon-Fri — today's earnings table
+    - cron: "0 10 * * 1-5"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # commits the market-cap cache
+
+concurrency:
+  group: earnings-today
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Post today's earnings table
+        env:
+          DISCORD_WEBHOOK_STOCK_EARNINGS: ${{ secrets.DISCORD_WEBHOOK_STOCK_EARNINGS }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          MIN_MCAP_B: "5"
+        run: python scripts/earnings.py today
+      - name: Save market-cap cache
+        run: |
+          git config user.name  "mrwallstreet-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git pull --rebase || true
+          git add state/ || true
+          git diff --cached --quiet || git commit -m "chore: update mcap cache"
+          git push
