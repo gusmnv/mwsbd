@@ -53,32 +53,31 @@ def parse(events):
     return by_day
 
 
-COLS = [("TIME (ET)", 10), ("CUR", 5), ("IMPACT", 8),
-        ("EVENT", 32), ("FORECAST", 10), ("PREVIOUS", 10)]
-TABLE_WIDTH = sum(w for _, w in COLS) + 2 * (len(COLS) - 1)
+HEADERS = ["TIME", "CURRENCY", "IMPACT", "EVENT", "FORECAST", "PREVIOUS"]
 
 
 def _C(s, w):
-    s = str(s)
-    if len(s) > w:
-        s = s[: w - 1] + "…"
-    return s.center(w)
+    return str(s).center(w)
+
+
+def _cells(dt, ev):
+    t = (dt.strftime("%-I:%M%p").lower() + " ET") if (dt.hour or dt.minute) else "All day"
+    return [t,
+            ev.get("country", "").upper(),
+            ev.get("impact", "").title(),
+            str(ev.get("title", "")),
+            str(ev.get("forecast") or "—"),
+            str(ev.get("previous") or "—")]
 
 
 def day_table_message(day, items) -> str:
+    """Dynamic column widths: each day's table is only as wide as its content."""
     title = f"__**{day.strftime('%A')}, {ordinal(day.day)} {day.strftime('%B')}**__"
-    header = "  ".join(_C(h, w) for h, w in COLS)
-    sep = "-" * TABLE_WIDTH
-    lines = []
-    for dt, ev in items:
-        t = dt.strftime("%-I:%M%p").lower() if (dt.hour or dt.minute) else "All day"
-        cells = [t,
-                 ev.get("country", "").upper(),
-                 ev.get("impact", "").title(),
-                 ev.get("title", ""),
-                 ev.get("forecast") or "—",
-                 ev.get("previous") or "—"]
-        lines.append("  ".join(_C(c, w) for c, (_, w) in zip(cells, COLS)))
+    rows = [_cells(dt, ev) for dt, ev in items]
+    widths = [max(len(h), *(len(r[i]) for r in rows)) for i, h in enumerate(HEADERS)]
+    header = "  ".join(_C(h, w) for h, w in zip(HEADERS, widths))
+    sep = "─" * (sum(widths) + 2 * (len(widths) - 1))
+    lines = ["  ".join(_C(c, w) for c, w in zip(r, widths)) for r in rows]
     return title + "\n```\n" + header + "\n" + sep + "\n" + "\n".join(lines) + "\n```"
 
 
@@ -120,10 +119,26 @@ def post_text(content: str):
 def main():
     if not WEBHOOK:
         sys.exit("Missing DISCORD_WEBHOOK_ECONOMIC_DATA env var")
+    mode = sys.argv[1] if len(sys.argv) > 1 else "week"
     by_day = parse(fetch_events())
     if not by_day:
         print("No matching events this week.")
         return
+
+    if mode == "today":
+        from zoneinfo import ZoneInfo
+        today_et = datetime.now(ZoneInfo("America/New_York")).date()
+        if today_et not in by_day:
+            print("No events today.")
+            return
+        post_text("📌 **TODAY'S ECONOMIC EVENTS**")
+        time.sleep(1)
+        for chunk in split_message(day_table_message(today_et, by_day[today_et])):
+            status = post_text(chunk)
+            print(f"Posted today chunk (HTTP {status}).")
+            time.sleep(1)
+        return
+
     days = sorted(by_day)
     post_text(f"📅 **ECONOMIC CALENDAR — WEEK AHEAD** "
               f"({days[0].strftime('%b %d')} – {days[-1].strftime('%b %d')})  ·  All times ET (New York)")
