@@ -281,7 +281,7 @@ def render_day_image(day_iso: str, entries: list[dict], mcaps: dict) -> bytes:
     img = Image.new("RGB", (W, H), (255, 255, 255))
     d = ImageDraw.Draw(img)
     f_title = _font(36, 700)
-    f_head  = _font(21, 600)
+    f_head  = _font(21, 700)
     f_cell  = _font(23, 400)
     f_tick  = _font(23, 700)
     f_pill  = _font(18, 600)
@@ -294,30 +294,27 @@ def render_day_image(day_iso: str, entries: list[dict], mcaps: dict) -> bytes:
     y = title_h
     d.rounded_rectangle([30, y, W - 30, y + header_h], radius=10, fill=(246, 247, 249))
     ty = y + 17
-    d.text((X_TICK, ty), "Company", font=f_head, fill=(87, 96, 108))
-    d.text((X_MCAP, ty), "Market cap", font=f_head, fill=(87, 96, 108), anchor="ra")
-    d.text((X_EPS, ty), "EPS estimate", font=f_head, fill=(87, 96, 108), anchor="ra")
-    d.text((X_REV, ty), "Revenue estimate", font=f_head, fill=(87, 96, 108), anchor="ra")
-    d.text((X_TIME, ty), "Timing", font=f_head, fill=(87, 96, 108), anchor="ra")
+    d.text((X_TICK, ty), "Company", font=f_head, fill=(31, 41, 55))
+    d.text((X_MCAP, ty), "Market cap", font=f_head, fill=(31, 41, 55), anchor="ra")
+    d.text((X_EPS, ty), "EPS estimate", font=f_head, fill=(31, 41, 55), anchor="ra")
+    d.text((X_REV, ty), "Revenue estimate", font=f_head, fill=(31, 41, 55), anchor="ra")
+    d.text((X_TIME, ty), "Timing", font=f_head, fill=(31, 41, 55), anchor="ra")
 
     y += header_h
     for i, e in enumerate(rows):
         if i:
-            d.line([(30, y), (W - 30, y)], fill=(236, 239, 243), width=2)
+            d.line([(30, y), (W - 30, y)], fill=(209, 215, 223), width=2)
         cy = y + 17
         sym = f"${e.get('symbol', '?')}"
-        d.text((X_TICK, cy), sym, font=f_tick, fill=(23, 92, 211))
+        d.text((X_TICK, cy), sym, font=f_tick, fill=(17, 21, 28))
         d.text((X_MCAP, cy), fmt_money(mcaps.get(e.get("symbol"))), font=f_cell,
                fill=(30, 34, 40), anchor="ra")
         d.text((X_EPS, cy), fmt_eps(e.get("epsEstimate")), font=f_cell,
                fill=(30, 34, 40), anchor="ra")
         d.text((X_REV, cy), fmt_money(e.get("revenueEstimate")), font=f_cell,
                fill=(30, 34, 40), anchor="ra")
-        label, bg, fg = TIME_PILL.get(e.get("hour", ""), TIME_PILL[""])
-        tw = d.textlength(label, font=f_pill)
-        px1, px0 = X_TIME, X_TIME - tw - 28
-        d.rounded_rectangle([px0, y + 13, px1, y + 46], radius=17, fill=bg)
-        d.text(((px0 + px1) / 2, y + 20), label, font=f_pill, fill=fg, anchor="ma")
+        d.text((X_TIME, cy), TIME_WORD.get(e.get("hour", ""), "TBD"), font=f_cell,
+               fill=(30, 34, 40), anchor="ra")
         y += row_h
 
     buf = io.BytesIO()
@@ -347,8 +344,12 @@ def post_image(png: bytes, filename: str, content: str = ""):
         return r.status
 
 
+def tickers_line(entries: list[dict]) -> str:
+    return " ".join(f"${e.get('symbol')}" for e in entries if e.get("symbol"))
+
+
 def build_day_images(entries: list[dict]):
-    """Returns [(day_iso, png_bytes)] for kept entries, grouped by day."""
+    """Returns [(day_iso, png_bytes, tickers_text)] for kept entries, grouped by day."""
     if not entries:
         return []
     mcaps = get_mcaps(sorted({e["symbol"] for e in entries if e.get("symbol")}))
@@ -358,7 +359,8 @@ def build_day_images(entries: list[dict]):
     by_day = defaultdict(list)
     for e in kept:
         by_day[e.get("date", "")].append(e)
-    return [(day, render_day_image(day, by_day[day], mcaps)) for day in sorted(by_day)]
+    return [(day, render_day_image(day, by_day[day], mcaps), tickers_line(by_day[day]))
+            for day in sorted(by_day)]
 
 
 # ---- modes ----------------------------------------------------------------------
@@ -373,8 +375,8 @@ def preview():
         return
     post_to_discord(f"🗓️ **EARNINGS WEEK AHEAD** ({monday.strftime('%b %d')} – {friday.strftime('%b %d')})")
     time.sleep(1)
-    for day, png in images:
-        status = post_image(png, f"earnings-{day}.png")
+    for day, png, tickers in images:
+        status = post_image(png, f"earnings-{day}.png", content=tickers)
         print(f"Posted {day} (HTTP {status}).")
         time.sleep(1)
 
@@ -386,8 +388,9 @@ def today_mode():
     if not images:
         print("No earnings above the cutoff today.")
         return
-    for day, png in images:
-        status = post_image(png, f"earnings-{day}.png", content="📌 **TODAY'S EARNINGS**")
+    for day, png, tickers in images:
+        status = post_image(png, f"earnings-{day}.png",
+                            content=f"📌 **TODAY'S EARNINGS**\n{tickers}")
         print(f"Posted {day} (HTTP {status}).")
 
 
