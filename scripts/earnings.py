@@ -52,6 +52,8 @@ SUFFIX_FLAG = {
 def flag(symbol: str) -> str:
     if "." in symbol:
         suf = symbol.rsplit(".", 1)[1].upper()
+        if suf in ("A", "B", "C"):  # US share classes like BF.B, BRK.B
+            return "🇺🇸"
         return SUFFIX_FLAG.get(suf, "🌍")
     return "🇺🇸"
 
@@ -80,6 +82,15 @@ def post_to_discord(content: str):
     )
     with urllib.request.urlopen(req, timeout=20) as r:
         return r.status
+
+
+def send_messages(msgs: list[str]):
+    """Send a list of pre-built messages, in order."""
+    for m in msgs:
+        if m.strip():
+            status = post_to_discord(m)
+            print(f"Posted message (HTTP {status}).")
+            time.sleep(1)
 
 
 def send_chunked(lines: list[str]):
@@ -189,15 +200,68 @@ def keep(entry: dict, mcap) -> bool:
     return rev is not None and float(rev) >= 1e9
 
 
-def line_for(e: dict, mcap) -> str:
-    sym = e.get("symbol", "?")
-    when = SESSION_LABEL.get(e.get("hour", ""), "Time n/a")
-    return (f"{flag(sym)} **${sym}** · {fmt_money(mcap)} · "
-            f"EPS est {fmt_eps(e.get('epsEstimate'))} · "
-            f"Rev est {fmt_money(e.get('revenueEstimate'))} · {when}")
+FLAG_CODE = {"🇺🇸": "US", "🇨🇳": "CN", "🇭🇰": "HK", "🇯🇵": "JP", "🇰🇷": "KR",
+             "🇬🇧": "GB", "🇪🇺": "EU", "🇨🇭": "CH", "🇳🇴": "NO", "🇨🇦": "CA",
+             "🇦🇺": "AU", "🇳🇿": "NZ", "🇧🇷": "BR", "🇲🇽": "MX", "🇮🇩": "ID",
+             "🇹🇭": "TH", "🇸🇬": "SG", "🇲🇾": "MY", "🇹🇼": "TW", "🇮🇳": "IN",
+             "🇹🇷": "TR", "🇮🇱": "IL", "🇿🇦": "ZA", "🌍": "INT"}
+
+TIME_CODE = {"bmo": "BMO", "amc": "AMC", "dmh": "MKT"}
+
+
+def num_short(x, money=True) -> str:
+    """Compact numbers for table columns: 780.0B / 15.2B / 3.30 / —"""
+    if x is None:
+        return "—"
+    try:
+        x = float(x)
+    except (TypeError, ValueError):
+        return "—"
+    a = abs(x)
+    if a >= 1e12:
+        return f"{x/1e12:.2f}T"
+    if a >= 1e9:
+        return f"{x/1e9:.1f}B"
+    if a >= 1e6:
+        return f"{x/1e6:.0f}M"
+    return f"{x:.2f}"
+
+
+TIME_WORD = {"bmo": "Before open", "amc": "After close", "dmh": "In market"}
+
+
+def row_for(e: dict, mcap) -> str:
+    sym = f"${e.get('symbol', '?')}"
+    when = TIME_WORD.get(e.get("hour", ""), "—")
+    return (f"{sym:<10}{num_short(mcap):>8}{num_short(e.get('epsEstimate'), money=False):>9}"
+            f"{num_short(e.get('revenueEstimate')):>9}  {when}")
+
+
+TABLE_HEADER = (f"{'COMPANY':<10}{'MCAP':>8}{'EPS EST':>9}{'REV EST':>9}  TIMING\n"
+                f"{'-'*10}{'-'*8}{'-'*9}{'-'*9}--{'-'*11}")
+
+
+def day_blocks(day_iso: str, entries: list[dict], mcaps: dict) -> list[str]:
+    """One Discord message (or more) per day: bold header + fenced table."""
+    d = date.fromisoformat(day_iso)
+    header = f"__**{d.strftime('%A, %B %d')}**__"
+    rows = [row_for(e, mcaps.get(e.get("symbol")))
+            for e in sorted(entries, key=lambda e: -(mcaps.get(e.get("symbol")) or 0))]
+    blocks, batch = [], []
+    for row in rows:
+        batch.append(row)
+        if sum(len(r) + 1 for r in batch) > 1700:  # keep under Discord limit
+            blocks.append(header + "\n```\n" + TABLE_HEADER + "\n" + "\n".join(batch) + "\n```")
+            header = ""  # only first block carries the day name
+            batch = []
+    if batch:
+        blocks.append((header + "\n" if header else "") +
+                      "```\n" + TABLE_HEADER + "\n" + "\n".join(batch) + "\n```")
+    return blocks
 
 
 def build_table(entries: list[dict], title: str) -> list[str]:
+    """Returns a list of ready-to-send Discord messages."""
     if not entries:
         return []
     mcaps = get_mcaps(sorted({e["symbol"] for e in entries if e.get("symbol")}))
@@ -208,16 +272,10 @@ def build_table(entries: list[dict], title: str) -> list[str]:
     for e in kept:
         by_day[e.get("date", "")].append(e)
 
-    lines = [title, ""]
+    messages = [title]
     for day in sorted(by_day):
-        d = date.fromisoformat(day)
-        lines.append(f"__**{d.strftime('%A, %B %d')}**__")
-        day_entries = sorted(by_day[day],
-                             key=lambda e: -(mcaps.get(e.get("symbol")) or 0))
-        for e in day_entries:
-            lines.append(line_for(e, mcaps.get(e.get("symbol"))))
-        lines.append("")
-    return lines
+        messages.extend(day_blocks(day, by_day[day], mcaps))
+    return messages
 
 
 # ---- modes ----------------------------------------------------------------------
@@ -226,10 +284,10 @@ def preview():
     monday = today + timedelta(days=(7 - today.weekday()) % 7 or 7)
     friday = monday + timedelta(days=4)
     entries = get_calendar(monday, friday)
-    lines = build_table(entries,
+    msgs = build_table(entries,
         f"🗓️ **EARNINGS WEEK AHEAD** ({monday.strftime('%b %d')} – {friday.strftime('%b %d')})")
-    if lines:
-        send_chunked(lines)
+    if msgs:
+        send_messages(msgs)
     else:
         print("Nothing above the cutoff next week.")
 
@@ -237,9 +295,9 @@ def preview():
 def today_mode():
     t = date.today()
     entries = [e for e in get_calendar(t, t) if e.get("date") == t.isoformat()]
-    lines = build_table(entries, f"📌 **TODAY'S EARNINGS** — {t.strftime('%A, %B %d')}")
-    if lines:
-        send_chunked(lines)
+    msgs = build_table(entries, f"📌 **TODAY'S EARNINGS** — {t.strftime('%A, %B %d')}")
+    if msgs:
+        send_messages(msgs)
     else:
         print("No earnings above the cutoff today.")
 
