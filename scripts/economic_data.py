@@ -55,8 +55,8 @@ def parse(events):
 
 # Fixed column widths (same for every day so all tables share the same right edge)
 # headers centered; text values left-aligned; numeric values right-aligned
-COLS = [("TIME", 10, "l"), ("CURRENCY", 8, "l"), ("IMPACT", 6, "l"),
-        ("EVENT", 34, "l"), ("FORECAST", 8, "r"), ("PREVIOUS", 8, "r")]
+COLS = [("TIME", 10, "r"), ("CURRENCY", 8, "c"), ("IMPACT", 6, "c"),
+        ("EVENT", 34, "c"), ("FORECAST", 8, "r"), ("PREVIOUS", 8, "r")]
 GAP = "    "
 TABLE_WIDTH = sum(w for _, w, _ in COLS) + len(GAP) * (len(COLS) - 1)
 
@@ -65,7 +65,11 @@ def _cell(s, w, a):
     s = str(s)
     if len(s) > w:
         s = s[: w - 1] + "…"
-    return s.ljust(w) if a == "l" else s.rjust(w)
+    if a == "l":
+        return s.ljust(w)
+    if a == "c":
+        return s.center(w)
+    return s.rjust(w)
 
 
 def _cells(dt, ev):
