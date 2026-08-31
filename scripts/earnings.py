@@ -70,7 +70,6 @@ def api(path: str, params: dict) -> object:
 
 def post_to_discord(content: str):
     payload = {
-        "username": "Mr Wall Street — Earnings",
         "content": content[:2000],
         "allowed_mentions": {"parse": []},
     }
@@ -326,8 +325,7 @@ def post_image(png: bytes, filename: str, content: str = ""):
     """Post an image to the Discord webhook (multipart upload)."""
     import uuid
     boundary = uuid.uuid4().hex
-    payload = {"username": "Mr Wall Street — Earnings",
-               "content": content[:2000], "allowed_mentions": {"parse": []}}
+    payload = {"content": content[:2000], "allowed_mentions": {"parse": []}}
     body = (
         f"--{boundary}\r\nContent-Disposition: form-data; name=\"payload_json\"\r\n"
         f"Content-Type: application/json\r\n\r\n{json.dumps(payload)}\r\n"
