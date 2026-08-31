@@ -442,7 +442,7 @@ def preview():
     if not msgs:
         print("Nothing above the cutoff next week.")
         return
-    post_to_discord("**EARNINGS WEEK AHEAD**")
+    post_to_discord("**WEEKLY CALENDAR**")
     time.sleep(1)
     send_messages(msgs)
 
@@ -454,7 +454,7 @@ def today_mode():
     if not msgs:
         print("No earnings above the cutoff today.")
         return
-    post_to_discord("**TODAY'S EARNINGS**")
+    post_to_discord("**TODAY'S CALENDAR**")
     time.sleep(1)
     send_messages(msgs)
 
@@ -548,7 +548,7 @@ def recap():
         print("Nothing reported today.")
         return
     kept, mcaps = result
-    post_to_discord("**EARNINGS DAILY RECAP**")
+    post_to_discord("**DAILY RECAP**")
     time.sleep(1)
     send_messages([recap_table_message(today_et.isoformat(),
                                        [e for e in kept if e.get("date") == today_et.isoformat()],
@@ -569,7 +569,7 @@ def week_recap():
     by_day = defaultdict(list)
     for e in kept:
         by_day[e.get("date", "")].append(e)
-    post_to_discord("**EARNINGS WEEKLY RECAP**")
+    post_to_discord("**WEEKLY RECAP**")
     time.sleep(1)
     send_messages([recap_table_message(day, by_day[day], mcaps) for day in sorted(by_day)])
 
