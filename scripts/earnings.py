@@ -60,12 +60,25 @@ def flag(symbol: str) -> str:
 SESSION_LABEL = {"bmo": "Before open", "amc": "After close", "dmh": "During market"}
 
 # ---- helpers -----------------------------------------------------------------
-def api(path: str, params: dict) -> object:
+def api(path: str, params: dict, retries: int = 3) -> object:
+    """Finnhub call with automatic retry on transient 5xx/network errors."""
     qs = "&".join(f"{k}={v}" for k, v in {**params, "token": API_KEY}.items())
     url = f"https://finnhub.io/api/v1/{path}?{qs}"
     req = urllib.request.Request(url, headers={"User-Agent": "MrWallStreetBot"})
-    with urllib.request.urlopen(req, timeout=20) as r:
-        return json.loads(r.read().decode())
+    last = None
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            last = e
+            if e.code < 500:          # 4xx: retrying won't help
+                raise
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+            last = e
+        if attempt < retries - 1:
+            time.sleep(10 * (attempt + 1))   # 10s, 20s
+    raise last
 
 
 def post_to_discord(content: str):
