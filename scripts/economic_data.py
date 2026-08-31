@@ -116,8 +116,7 @@ def split_message(msg: str) -> list[str]:
 
 
 def post_text(content: str):
-    payload = {"username": "Mr Wall Street — Markets",
-               "content": content[:2000], "allowed_mentions": {"parse": []}}
+    payload = {"content": content[:2000], "allowed_mentions": {"parse": []}}
     req = urllib.request.Request(
         WEBHOOK, data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json", "User-Agent": "MrWallStreetBot"},
