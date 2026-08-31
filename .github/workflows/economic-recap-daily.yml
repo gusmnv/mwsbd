@@ -1,0 +1,25 @@
+name: economic-recap-daily
+
+on:
+  schedule:
+    # 01:05 UTC Tue-Sat = 21:05 ET Mon-Fri (right after the earnings daily recap)
+    - cron: "30 0 * * 2-6"
+  workflow_dispatch: {}
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Wait until exact post time
+        run: |
+          target=$(date -u -d "today 01:05 UTC" +%s)
+          now=$(date -u +%s)
+          [ "$now" -lt "$target" ] && sleep $((target-now)) || true
+      - name: Post daily economic recap
+        env:
+          DISCORD_WEBHOOK_ECONOMIC_DATA: ${{ secrets.DISCORD_WEBHOOK_ECONOMIC_DATA }}
+        run: python scripts/economic_data.py recap
