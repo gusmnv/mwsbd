@@ -1,9 +1,9 @@
-name: earnings-recap-weekly
+name: economic-recap-weekly
 
 on:
   schedule:
-    # 01:30 UTC Saturday = 21:30 ET Friday — 30 min after Friday's daily recap
-    - cron: "55 0 * * 6"
+    # 01:35 UTC Saturday = 21:35 ET Friday (right after the earnings weekly recap)
+    - cron: "0 1 * * 6"
   workflow_dispatch: {}
 
 jobs:
@@ -16,16 +16,10 @@ jobs:
           python-version: "3.12"
       - name: Wait until exact post time
         run: |
-          target=$(date -u -d "today 01:30 UTC" +%s)
+          target=$(date -u -d "today 01:35 UTC" +%s)
           now=$(date -u +%s)
-          if [ "$now" -lt "$target" ]; then
-            echo "Sleeping $((target-now))s until 01:30 UTC sharp"
-            sleep $((target-now))
-          else
-            echo "Started after target — posting immediately"
-          fi
-      - name: Post weekly earnings recap
+          [ "$now" -lt "$target" ] && sleep $((target-now)) || true
+      - name: Post weekly economic recap
         env:
-          DISCORD_WEBHOOK_STOCK_EARNINGS: ${{ secrets.DISCORD_WEBHOOK_STOCK_EARNINGS }}
-          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
-        run: python scripts/earnings.py weekrecap
+          DISCORD_WEBHOOK_ECONOMIC_DATA: ${{ secrets.DISCORD_WEBHOOK_ECONOMIC_DATA }}
+        run: python scripts/economic_data.py weekrecap
