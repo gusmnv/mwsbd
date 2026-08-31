@@ -31,10 +31,18 @@ def ordinal(n: int) -> str:
     return f"{n}" + {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
 
 
-def fetch_events():
+def fetch_events(retries=3):
     req = urllib.request.Request(FEED_URL, headers={"User-Agent": "Mozilla/5.0 (MrWallStreetBot)"})
-    with urllib.request.urlopen(req, timeout=20) as r:
-        return json.loads(r.read().decode())
+    last = None
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return json.loads(r.read().decode())
+        except Exception as e:
+            last = e
+            if attempt < retries - 1:
+                time.sleep(10 * (attempt + 1))
+    raise last
 
 
 def parse(events):
