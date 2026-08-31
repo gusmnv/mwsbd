@@ -92,6 +92,37 @@ def day_table_message(day, items) -> str:
     return title + "\n```\n" + header + "\n" + sep + "\n" + "\n".join(lines) + "\n```"
 
 
+
+
+# ---- daily / weekly recap (uses actuals captured by economic_live.py) ---------
+ACTUALS_FILE = __import__("pathlib").Path(__file__).resolve().parent.parent / "state" / "econ_actuals.json"
+
+RCOLS = [("TIME", 10, "r"), ("CURRENCY", 8, "c"), ("EVENT", 34, "c"),
+         ("FORECAST", 8, "r"), ("ACTUAL", 8, "r")]
+RWIDTH = sum(w for _, w, _ in RCOLS) + len(GAP) * (len(RCOLS) - 1)
+
+
+def load_actuals():
+    try:
+        return json.loads(ACTUALS_FILE.read_text())
+    except Exception:
+        return {}
+
+
+def recap_table_message(day, items, actuals) -> str:
+    title = f"__**{day.strftime('%A')}, {ordinal(day.day)} {day.strftime('%B')}**__"
+    header = GAP.join(str(h).center(w) for h, w, _ in RCOLS)
+    sep = "─" * RWIDTH
+    lines = []
+    for dt, ev in items:
+        t = (dt.strftime("%-I:%M%p").lower() + " ET") if (dt.hour or dt.minute) else "All day"
+        key = f"{day.isoformat()}|{ev.get('country','').upper()}|{ev.get('title','')}"
+        cells = [t, ev.get("country", "").upper(), str(ev.get("title", "")),
+                 str(ev.get("forecast") or "—"), str(actuals.get(key, "—"))]
+        lines.append(GAP.join(_cell(c, w, a) for c, (_, w, a) in zip(cells, RCOLS)))
+    return title + "\n```\n" + header + "\n" + sep + "\n" + "\n".join(lines) + "\n```"
+
+
 def split_message(msg: str) -> list[str]:
     """Split an over-long day table into <=1900-char chunks, repeating the fence."""
     if len(msg) <= 1900:
@@ -141,7 +172,7 @@ def main():
         if today_et not in by_day:
             print("No events today.")
             return
-        post_text("**TODAY'S ECONOMIC EVENTS**")
+        post_text("**TODAY'S CALENDAR**")
         time.sleep(1)
         for chunk in split_message(day_table_message(today_et, by_day[today_et])):
             status = post_text(chunk)
@@ -149,8 +180,35 @@ def main():
             time.sleep(1)
         return
 
+    if mode in ("recap", "weekrecap"):
+        from zoneinfo import ZoneInfo
+        actuals = load_actuals()
+        today_et = datetime.now(ZoneInfo("America/New_York")).date()
+        if mode == "recap":
+            if today_et not in by_day:
+                print("No events today.")
+                return
+            post_text("**DAILY RECAP**")
+            time.sleep(1)
+            for chunk in split_message(recap_table_message(today_et, by_day[today_et], actuals)):
+                print(f"Posted recap (HTTP {post_text(chunk)}).")
+                time.sleep(1)
+        else:
+            monday = today_et - __import__("datetime").timedelta(days=today_et.weekday())
+            days = [d for d in sorted(by_day) if monday <= d <= today_et]
+            if not days:
+                print("No events this week.")
+                return
+            post_text("**WEEKLY RECAP**")
+            time.sleep(1)
+            for day in days:
+                for chunk in split_message(recap_table_message(day, by_day[day], actuals)):
+                    print(f"Posted {day} recap (HTTP {post_text(chunk)}).")
+                    time.sleep(1)
+        return
+
     days = sorted(by_day)
-    post_text("**WEEKLY ECONOMIC CALENDAR**")
+    post_text("**WEEKLY CALENDAR**")
     time.sleep(1)
     for day in days:
         for chunk in split_message(day_table_message(day, by_day[day])):
