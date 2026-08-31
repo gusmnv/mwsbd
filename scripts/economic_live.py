@@ -40,10 +40,18 @@ ET = ZoneInfo("America/New_York")
 
 
 # ---------------------------------------------------------------- HTTP helpers
-def http_get(url, timeout=20):
+def http_get(url, timeout=20, retries=3):
     req = urllib.request.Request(url, headers={"User-Agent": "MrWallStreetBot (contact: alternartivebull@gmail.com)"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read()
+    last = None
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read()
+        except Exception as e:
+            last = e
+            if attempt < retries - 1:
+                time.sleep(5 * (attempt + 1))
+    raise last
 
 
 def post_discord(content: str):
