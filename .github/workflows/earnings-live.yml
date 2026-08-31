@@ -5,8 +5,8 @@ on:
     # Live sessions (UTC), Mon-Fri:
     # 11:00 UTC = 07:00 ET  → pre-market session (2h10)
     # 20:00 UTC = 16:00 ET  → after-hours session (2h10)
-    - cron: "0 11 * * 1-5"
-    - cron: "0 20 * * 1-5"
+    - cron: "25 10 * * 1-5"
+    - cron: "25 19 * * 1-5"
   workflow_dispatch: {}
 
 permissions:
@@ -19,12 +19,21 @@ concurrency:
 jobs:
   watch:
     runs-on: ubuntu-latest
-    timeout-minutes: 140
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Wait until session start (11:00 or 20:00 UTC sharp)
+        run: |
+          now=$(date -u +%s)
+          t1=$(date -u -d "today 11:00 UTC" +%s)
+          t2=$(date -u -d "today 20:00 UTC" +%s)
+          if   [ "$now" -lt "$t1" ]; then target=$t1
+          elif [ "$now" -lt "$t2" ]; then target=$t2
+          else target=$now; fi
+          [ "$target" -gt "$now" ] && { echo "Sleeping $((target-now))s"; sleep $((target-now)); } || echo "Starting now"
       - name: Live earnings watch (EDGAR + Finnhub)
         env:
           DISCORD_WEBHOOK_STOCK_EARNINGS: ${{ secrets.DISCORD_WEBHOOK_STOCK_EARNINGS }}
