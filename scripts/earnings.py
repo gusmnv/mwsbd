@@ -552,10 +552,14 @@ def _reported_between(frm: date, to: date) -> list[dict]:
 
 
 def recap():
-    """End of day: table of everything that reported today (ET)."""
+    """End of day: table of everything that reported today (ET).
+
+    Anchored: the intended post time is ~21:00 ET. If GitHub fires us hours
+    late and we cross midnight ET, (now - 8h) still lands on the day we were
+    meant to recap - never the day that hasn't happened yet."""
     from zoneinfo import ZoneInfo
     from datetime import datetime as _dt
-    today_et = _dt.now(ZoneInfo("America/New_York")).date()
+    today_et = (_dt.now(ZoneInfo("America/New_York")) - timedelta(hours=8)).date()
     result = _reported_between(today_et, today_et)
     if not result or not result[0]:
         print("Nothing reported today.")
@@ -569,10 +573,11 @@ def recap():
 
 
 def week_recap():
-    """Friday night: table of the whole week's results, grouped by day."""
+    """Friday night: table of the whole week's results, grouped by day.
+    Anchored to (now - 8h) so a late start never rolls into Saturday."""
     from zoneinfo import ZoneInfo
     from datetime import datetime as _dt
-    today_et = _dt.now(ZoneInfo("America/New_York")).date()
+    today_et = (_dt.now(ZoneInfo("America/New_York")) - timedelta(hours=8)).date()
     monday = today_et - timedelta(days=today_et.weekday())
     result = _reported_between(monday, today_et)
     if not result or not result[0]:
