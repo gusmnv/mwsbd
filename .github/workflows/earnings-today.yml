@@ -3,7 +3,7 @@ name: earnings-today
 on:
   schedule:
     # 10:00 UTC = 14:00 Dubai = 06:00 New York, Mon-Fri — today's earnings table
-    - cron: "25 9 * * 1-5"
+    - cron: "23 9 * * 1-5"
   workflow_dispatch: {}
 
 permissions:
@@ -29,7 +29,7 @@ jobs:
             echo "Sleeping $((target-now))s until 10:00 UTC sharp"
             sleep $((target-now))
           else
-            echo "Started after target — posting immediately"
+            echo "LATE START: $(( (now-target)/60 )) min after target — posting anyway"
           fi
       - name: Install dependencies
         run: |
@@ -50,4 +50,4 @@ jobs:
           git pull --rebase || true
           git add state/ || true
           git diff --cached --quiet || git commit -m "chore: update mcap cache"
-          git push
+          git pushsh
