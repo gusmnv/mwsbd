@@ -3,7 +3,7 @@ name: economic-recap-daily
 on:
   schedule:
     # 01:05 UTC Tue-Sat = 21:05 ET Mon-Fri (right after the earnings daily recap)
-    - cron: "30 0 * * 2-6"
+    - cron: "27 0 * * 2-6"
   workflow_dispatch: {}
 
 jobs:
