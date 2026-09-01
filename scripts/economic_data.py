@@ -190,8 +190,11 @@ def main():
 
     if mode in ("recap", "weekrecap"):
         from zoneinfo import ZoneInfo
+        from datetime import timedelta as _td
         actuals = load_actuals()
-        today_et = datetime.now(ZoneInfo("America/New_York")).date()
+        # anchored: intended post ~21:05 ET. A late start past midnight ET
+        # must still recap the day we were meant to recap, not tomorrow.
+        today_et = (datetime.now(ZoneInfo("America/New_York")) - _td(hours=8)).date()
         if mode == "recap":
             if today_et not in by_day:
                 print("No events today.")
