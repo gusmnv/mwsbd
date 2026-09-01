@@ -3,9 +3,9 @@ name: economic-live
 on:
   schedule:
     # Morning session: starts 12:25 UTC sharp (08:25 ET), 105 min — covers 8:30 & 10:00 releases
-    - cron: "50 11 * * 1-5"
+    - cron: "47 11 * * 1-5"
     # Afternoon check: starts 17:55 UTC sharp (13:55 ET), 15 min — FOMC days
-    - cron: "20 17 * * 1-5"
+    - cron: "17 17 * * 1-5"
   workflow_dispatch: {}
 
 permissions:
