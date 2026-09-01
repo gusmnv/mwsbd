@@ -5,8 +5,8 @@ on:
     # Live sessions (UTC), Mon-Fri:
     # 11:00 UTC = 07:00 ET  → pre-market session (2h10)
     # 20:00 UTC = 16:00 ET  → after-hours session (2h10)
-    - cron: "25 10 * * 1-5"
-    - cron: "25 19 * * 1-5"
+    - cron: "21 10 * * 1-5"
+    - cron: "21 19 * * 1-5"
   workflow_dispatch: {}
 
 permissions:
