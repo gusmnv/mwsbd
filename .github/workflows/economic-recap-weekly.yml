@@ -3,7 +3,7 @@ name: economic-recap-weekly
 on:
   schedule:
     # 01:35 UTC Saturday = 21:35 ET Friday (right after the earnings weekly recap)
-    - cron: "0 1 * * 6"
+    - cron: "57 0 * * 6"
   workflow_dispatch: {}
 
 jobs:
