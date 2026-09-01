@@ -3,7 +3,7 @@ name: economic-today
 on:
   schedule:
     # 04:05 UTC = 00:05 ET — start of each ET day, Mon-Sat (Sat catches Friday-night Asia)
-    - cron: "30 3 * * 1-6"
+    - cron: "27 3 * * 1-6"
   workflow_dispatch: {}
 
 jobs:
@@ -22,7 +22,7 @@ jobs:
             echo "Sleeping $((target-now))s until 04:05 UTC sharp"
             sleep $((target-now))
           else
-            echo "Started after target — posting immediately"
+            echo "LATE START: $(( (now-target)/60 )) min after target — posting anyway"
           fi
       - name: Post today's economic events
         env:
