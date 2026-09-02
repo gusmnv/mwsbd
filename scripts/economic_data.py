@@ -188,6 +188,22 @@ def main():
             time.sleep(1)
         return
 
+    if mode == "tomorrow":
+        from zoneinfo import ZoneInfo
+        from datetime import timedelta as _td
+        # runs in the US evening: "tomorrow" = the ET day after the anchored business day
+        base = (datetime.now(ZoneInfo("America/New_York")) - _td(hours=8)).date()
+        target = base + _td(days=1)
+        if target not in by_day:
+            print("No events tomorrow.")
+            return
+        post_text("**TOMORROW'S CALENDAR**")
+        time.sleep(1)
+        for chunk in split_message(day_table_message(target, by_day[target])):
+            print(f"Posted tomorrow chunk (HTTP {post_text(chunk)}).")
+            time.sleep(1)
+        return
+
     if mode in ("recap", "weekrecap"):
         from zoneinfo import ZoneInfo
         from datetime import timedelta as _td
