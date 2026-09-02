@@ -30,9 +30,13 @@ jobs:
           now=$(date -u +%s)
           m=$(date -u -d "today 12:25 UTC" +%s)
           a=$(date -u -d "today 17:55 UTC" +%s)
-          if [ "$now" -lt "$m" ]; then target=$m; mins=105
-          elif [ "$now" -lt "$a" ]; then target=$a; mins=15
-          else target=$now; mins=15; fi
+          TOL=5400   # <=90 min late still joins its own window; later than that, skip
+          if   [ "$now" -lt "$m" ] && [ "$((m-now))" -le "$TOL" ]; then target=$m; mins=105
+          elif [ "$now" -ge "$m" ] && [ "$now" -lt "$((m+TOL))" ]; then target=$now; mins=105; echo "LATE: joining morning window"
+          elif [ "$now" -lt "$a" ] && [ "$((a-now))" -le "$TOL" ]; then target=$a; mins=15
+          elif [ "$now" -ge "$a" ] && [ "$now" -lt "$((a+1800))" ]; then target=$now; mins=15; echo "LATE: joining afternoon window"
+          elif [ "$now" -lt "$a" ]; then echo "Woken far from any window - skipping rather than sleeping across it"; exit 0
+          else echo "Too late for any window today - skipping"; exit 0; fi
           [ "$target" -gt "$now" ] && { echo "Sleeping $((target-now))s"; sleep $((target-now)); } || true
           echo "mins=$mins" >> "$GITHUB_OUTPUT"
       - name: Live US economic data watch (BLS/BEA/Fed)
