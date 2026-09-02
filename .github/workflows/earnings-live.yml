@@ -30,10 +30,14 @@ jobs:
           now=$(date -u +%s)
           t1=$(date -u -d "today 11:00 UTC" +%s)
           t2=$(date -u -d "today 20:00 UTC" +%s)
-          if   [ "$now" -lt "$t1" ]; then target=$t1
-          elif [ "$now" -lt "$t2" ]; then target=$t2
-          else target=$now; fi
-          [ "$target" -gt "$now" ] && { echo "Sleeping $((target-now))s"; sleep $((target-now)); } || echo "Starting now"
+          TOL=5400   # <=90 min late still joins its own session; later than that, skip
+          if   [ "$now" -lt "$t1" ] && [ "$((t1-now))" -le "$TOL" ]; then target=$t1
+          elif [ "$now" -ge "$t1" ] && [ "$now" -lt "$((t1+TOL))" ]; then target=$now; echo "LATE: joining morning session $(( (now-t1)/60 )) min late"
+          elif [ "$now" -lt "$t2" ] && [ "$((t2-now))" -le "$TOL" ]; then target=$t2
+          elif [ "$now" -ge "$t2" ] && [ "$now" -lt "$((t2+TOL))" ]; then target=$now; echo "LATE: joining evening session $(( (now-t2)/60 )) min late"
+          elif [ "$now" -lt "$t2" ]; then echo "Missed the morning window; evening is $(( (t2-now)/60 )) min away - skipping, never sleeping across sessions"; exit 0
+          else echo "Too late for any session today - skipping"; exit 0; fi
+          [ "$target" -gt "$now" ] && { echo "Sleeping $((target-now))s"; sleep $((target-now)); } || true
       - name: Live earnings watch (EDGAR + Finnhub)
         env:
           DISCORD_WEBHOOK_STOCK_EARNINGS: ${{ secrets.DISCORD_WEBHOOK_STOCK_EARNINGS }}
