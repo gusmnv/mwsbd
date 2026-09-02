@@ -50,4 +50,4 @@ jobs:
           git pull --rebase || true
           git add state/ || true
           git diff --cached --quiet || git commit -m "chore: update mcap cache"
-          git pushsh
+          git push || true   # cache is best-effort: a push race must never fail the run
