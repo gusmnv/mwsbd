@@ -115,6 +115,13 @@ def mom_diff_k(rows):
     return round(rows[0][1] - rows[1][1])
 
 
+def level_m(rows):
+    """Latest level, thousands → millions (JOLTS job openings)."""
+    if not rows:
+        return None
+    return round(rows[0][1] / 1000.0, 2)
+
+
 # ---------------------------------------------------------------- BEA source
 def bea_table(table, freq):
     url = ("https://apps.bea.gov/api/data/?&UserID=" + BEA_KEY +
@@ -212,6 +219,7 @@ HANDLERS = [
     (r"Non-?Farm Employment",      lambda: BLSHandler("CES0000000001", mom_diff_k, unit="K")),
     (r"^Unemployment Rate$",       lambda: BLSHandler("LNS14000000", lambda r: r[0][1])),
     (r"Average Hourly Earnings",   lambda: BLSHandler("CES0500000003", mom_pct)),
+    (r"JOLTS Job Openings",        lambda: BLSHandler("JTS000000000000000JOL", level_m, unit="M")),
     (r"^Core PPI m/m$",            lambda: BLSHandler("WPSFD49116", mom_pct)),
     (r"^PPI m/m$",                 lambda: BLSHandler("WPSFD4", mom_pct)),
     (r"GDP (q/q|Price)",           lambda: BEAHandler("T10101", "Q", r"^Gross domestic product$")),
@@ -231,6 +239,8 @@ def match_handler(title):
 def fmt_actual(v, unit):
     if unit == "K":
         return f"{v:+.0f}K".replace("+-", "-")
+    if unit == "M":
+        return f"{v:.2f}M"
     if unit == "%":
         return f"{v}%"
     return str(v)
@@ -238,7 +248,7 @@ def fmt_actual(v, unit):
 
 def parse_forecast(s):
     try:
-        return float(str(s).replace("%", "").replace("K", "").replace(",", ""))
+        return float(str(s).replace("%", "").replace("K", "").replace("M", "").replace(",", ""))
     except (TypeError, ValueError):
         return None
 
