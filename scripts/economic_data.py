@@ -117,6 +117,44 @@ def load_actuals():
         return {}
 
 
+def backfill_actuals(day, items, actuals):
+    """For events still missing an actual, ask the official APIs directly at
+    recap time (BLS/BEA published hours ago even if the live session missed its
+    window). Covers USD events with handlers + CAD Overnight Rate via the Bank
+    of Canada Valet API. Best-effort: any failure leaves the dash in place."""
+    try:
+        import economic_live as L
+    except Exception as e:
+        print(f"[warn] backfill unavailable: {e}")
+        return actuals
+    for dt, ev in items:
+        cur = ev.get("country", "").upper()
+        title = str(ev.get("title", ""))
+        key = f"{day.isoformat()}|{cur}|{title}"
+        if actuals.get(key):
+            continue
+        try:
+            if cur == "USD":
+                h = L.match_handler(title)
+                if not h or isinstance(h, L.FedHandler):
+                    continue
+                r = h.value_latest() if hasattr(h, "value_latest") else None
+                if r is not None:
+                    actuals[key] = L.fmt_actual(*r)
+                    print(f"backfilled {title}: {actuals[key]}")
+            elif cur == "CAD" and "Overnight Rate" in title:
+                raw = urllib.request.urlopen(urllib.request.Request(
+                    "https://www.bankofcanada.ca/valet/observations/V39079/json?recent=1",
+                    headers={"User-Agent": "MrWallStreetBot"}), timeout=20).read()
+                obs = json.loads(raw)["observations"]
+                if obs:
+                    actuals[key] = f"{float(obs[-1]['V39079']['v']):.2f}%"
+                    print(f"backfilled {title}: {actuals[key]}")
+        except Exception as e:
+            print(f"[warn] backfill {title}: {e}")
+    return actuals
+
+
 def recap_table_message(day, items, actuals) -> str:
     title = f"__**{day.strftime('%A')}, {ordinal(day.day)} {day.strftime('%B')}**__"
     header = GAP.join(str(h).center(w) for h, w, _ in RCOLS)
@@ -215,6 +253,12 @@ def main():
             if today_et not in by_day:
                 print("No events today.")
                 return
+            actuals = backfill_actuals(today_et, by_day[today_et], actuals)
+            try:
+                ACTUALS_FILE.parent.mkdir(parents=True, exist_ok=True)
+                ACTUALS_FILE.write_text(json.dumps(actuals, indent=0))
+            except Exception:
+                pass
             post_text("**DAILY RECAP**")
             time.sleep(1)
             for chunk in split_message(recap_table_message(today_et, by_day[today_et], actuals)):
