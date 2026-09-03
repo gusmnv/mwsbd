@@ -95,6 +95,17 @@ def main():
     alerted = set(E.load_json(ALERTED_FILE, []))
     reported = set(E.load_json(E.REPORTED_FILE, []))
 
+    # Seed: whatever is ALREADY in the EDGAR feed at startup was not filed "just
+    # now" - mark it seen silently so a late-started session never lies with
+    # "has just reported". Only filings appearing AFTER this moment get the alert.
+    if ticker_by_cik:
+        try:
+            for cik in edgar_recent_ciks() & set(ticker_by_cik):
+                alerted.add(f"{ticker_by_cik[cik]}:{today.isoformat()}")
+            print(f"Seeded {len(alerted)} pre-session filings (no alerts for those).")
+        except Exception as e:
+            print(f"[warn] EDGAR seed failed: {e}")
+
     # --- live loop --------------------------------------------------------------
     while time.time() < deadline:
         # Layer 1: EDGAR instant alerts
