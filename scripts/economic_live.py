@@ -228,7 +228,7 @@ HANDLERS = [
     (r"^Core CPI m/m$",            lambda: BLSHandler("CUSR0000SA0L1E", mom_pct)),
     (r"^CPI m/m$",                 lambda: BLSHandler("CUSR0000SA0", mom_pct)),
     (r"^CPI y/y$",                 lambda: BLSHandler("CUUR0000SA0", yoy_pct)),
-    (r"Non-?Farm Employment",      lambda: BLSHandler("CES0000000001", mom_diff_k, unit="K")),
+    (r"^Non-?Farm Employment",     lambda: BLSHandler("CES0000000001", mom_diff_k, unit="K")),  # anchored: never match "ADP Non-Farm..."
     (r"^Unemployment Rate$",       lambda: BLSHandler("LNS14000000", lambda r: r[0][1])),
     (r"Average Hourly Earnings",   lambda: BLSHandler("CES0500000003", mom_pct)),
     (r"JOLTS Job Openings",        lambda: BLSHandler("JTS000000000000000JOL", level_m, unit="M")),
