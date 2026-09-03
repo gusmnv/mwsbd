@@ -1,616 +1,161 @@
 """
-Mr Wall Street — #stock-earnings bot (Finnhub)
+Mr Wall Street — LIVE earnings watcher (#stock-earnings)
 
-Modes:
-  python earnings.py preview  → Sunday: week-ahead table, grouped by day
-  python earnings.py today    → each morning: today's earnings table
-  python earnings.py results  → hourly in reporting windows: BEAT/MISS posts
+Runs as a continuous session during the hot windows (pre-market / after-hours):
+  Layer 1 — SEC EDGAR: polls the real-time 8-K feed every cycle. The second an
+            expected reporter files, posts an instant alert.
+  Layer 2 — Finnhub: polls actuals every cycle; the moment EPS/revenue land,
+            posts the full numbers vs estimates with surprise percentages.
 
-Line format (QuarterChart style):
-  🇺🇸 $AVGO · $780B · EPS est $3.30 · Rev est $15.2B · After close
+Only companies >= MIN_MCAP_B (default $5B), same rule as everything else.
 
-Filters: market cap >= MIN_MCAP_B (billions USD, default 5).
-Companies whose market cap is unavailable are kept if their revenue
-estimate is >= $1B (so internationals without profile data still show).
+Usage:  python earnings_live.py            (runs for LIVE_MINUTES, default 120)
 
-Required env vars:
-  DISCORD_WEBHOOK_STOCK_EARNINGS — webhook URL of the #stock-earnings channel
-  FINNHUB_API_KEY                — free key from finnhub.io
-Optional:
-  MIN_MCAP_B                    — market-cap cutoff in $B (default "5")
+Env vars: DISCORD_WEBHOOK_STOCK_EARNINGS, FINNHUB_API_KEY,
+          LIVE_MINUTES (optional), MIN_MCAP_B (optional)
 """
 import json
-import os
+import re
 import sys
 import time
 import urllib.request
-from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
-WEBHOOK = os.environ.get("DISCORD_WEBHOOK_STOCK_EARNINGS", "").strip()
-API_KEY = os.environ.get("FINNHUB_API_KEY", "").strip()
-MIN_MCAP_B = float(os.environ.get("MIN_MCAP_B", "5"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import earnings as E  # reuse api(), get_calendar(), get_mcaps(), keep(), formatters, posting
+
+import os
+LIVE_MINUTES = int(os.environ.get("LIVE_MINUTES", "120"))
+POLL_SECONDS = 20
 
 STATE_DIR = Path(__file__).resolve().parent.parent / "state"
-REPORTED_FILE = STATE_DIR / "reported_earnings.json"
-MCAP_CACHE_FILE = STATE_DIR / "mcap_cache.json"
+ALERTED_FILE = STATE_DIR / "edgar_alerted.json"
 
-# ---- region by ticker suffix -------------------------------------------------
-EU = "🇪🇺"  # all European Union listings show the EU flag, per Mr Wall Street
-SUFFIX_FLAG = {
-    "SS": "🇨🇳", "SZ": "🇨🇳", "HK": "🇭🇰", "T": "🇯🇵", "KS": "🇰🇷", "KQ": "🇰🇷",
-    "L": "🇬🇧", "SW": "🇨🇭", "OL": "🇳🇴",  # non-EU Europe keeps its own flag
-    "PA": EU, "DE": EU, "F": EU, "MI": EU, "AS": EU, "BR": EU, "MC": EU,
-    "LS": EU, "ST": EU, "CO": EU, "HE": EU, "VI": EU, "WA": EU, "PR": EU,
-    "AT": EU, "IR": EU,
-    "TO": "🇨🇦", "V": "🇨🇦", "AX": "🇦🇺", "NZ": "🇳🇿", "SA": "🇧🇷", "MX": "🇲🇽",
-    "JK": "🇮🇩", "BK": "🇹🇭", "SI": "🇸🇬", "KL": "🇲🇾", "TW": "🇹🇼", "TWO": "🇹🇼",
-    "NS": "🇮🇳", "BO": "🇮🇳", "IS": "🇹🇷", "TA": "🇮🇱", "JO": "🇿🇦",
-}
-
-def flag(symbol: str) -> str:
-    if "." in symbol:
-        suf = symbol.rsplit(".", 1)[1].upper()
-        if suf in ("A", "B", "C"):  # US share classes like BF.B, BRK.B
-            return "🇺🇸"
-        return SUFFIX_FLAG.get(suf, "🌍")
-    return "🇺🇸"
-
-SESSION_LABEL = {"bmo": "Before open", "amc": "After close", "dmh": "During market"}
-
-# ---- helpers -----------------------------------------------------------------
-def api(path: str, params: dict, retries: int = 3) -> object:
-    """Finnhub call with automatic retry on transient 5xx/network errors."""
-    qs = "&".join(f"{k}={v}" for k, v in {**params, "token": API_KEY}.items())
-    url = f"https://finnhub.io/api/v1/{path}?{qs}"
-    req = urllib.request.Request(url, headers={"User-Agent": "MrWallStreetBot"})
-    last = None
-    for attempt in range(retries):
-        try:
-            with urllib.request.urlopen(req, timeout=20) as r:
-                return json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            last = e
-            if e.code < 500:          # 4xx: retrying won't help
-                raise
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
-            last = e
-        if attempt < retries - 1:
-            time.sleep(10 * (attempt + 1))   # 10s, 20s
-    raise last
+EDGAR_FEED = ("https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent"
+              "&type=8-K&company=&dateb=&owner=include&count=100&output=atom")
+CIK_MAP_URL = "https://www.sec.gov/files/company_tickers.json"
+SEC_UA = {"User-Agent": "MrWallStreetBot contact alternartivebull@gmail.com"}
 
 
-def post_to_discord(content: str):
-    payload = {
-        "content": content[:2000],
-        "allowed_mentions": {"parse": []},
-    }
-    req = urllib.request.Request(
-        WEBHOOK,
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json", "User-Agent": "MrWallStreetBot"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=20) as r:
-        return r.status
+def fetch(url, headers=None, timeout=20):
+    req = urllib.request.Request(url, headers=headers or {"User-Agent": "MrWallStreetBot"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read()
 
 
-def send_messages(msgs: list[str]):
-    """Send a list of pre-built messages, in order."""
-    for m in msgs:
-        if m.strip():
-            status = post_to_discord(m)
-            print(f"Posted message (HTTP {status}).")
-            time.sleep(1)
-
-
-def send_chunked(lines: list[str]):
-    chunks, current = [], ""
-    for line in lines:
-        if len(current) + len(line) + 1 > 1900:
-            chunks.append(current)
-            current = ""
-        current += line + "\n"
-    if current.strip():
-        chunks.append(current)
-    for chunk in chunks:
-        status = post_to_discord(chunk)
-        print(f"Posted chunk (HTTP {status}).")
-        time.sleep(1)
-
-
-def load_json(p: Path, default):
-    if p.exists():
-        try:
-            return json.loads(p.read_text())
-        except Exception:
-            return default
-    return default
-
-
-def save_json(p: Path, data):
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(data))
-
-
-def fmt_money(x) -> str:
-    """1234500000 -> $1.23B ; 45300000 -> $45.3M"""
-    if x is None:
-        return "—"
-    try:
-        x = float(x)
-    except (TypeError, ValueError):
-        return "—"
-    a = abs(x)
-    if a >= 1e12:
-        return f"${x/1e12:.2f}T"
-    if a >= 1e9:
-        return f"${x/1e9:.2f}B"
-    if a >= 1e6:
-        return f"${x/1e6:.1f}M"
-    return f"${x:,.0f}"
-
-
-def fmt_eps(x) -> str:
-    if x is None:
-        return "—"
-    try:
-        return f"${float(x):.2f}"
-    except (TypeError, ValueError):
-        return "—"
-
-
-# ---- market cap (Finnhub profile2, cached) ------------------------------------
-def get_mcaps(symbols: list[str]) -> dict:
-    """Return {symbol: market cap in $ (float) or None}. Cached in state/."""
-    cache = load_json(MCAP_CACHE_FILE, {})  # {sym: [mcap_musd, yyyymmdd]}
-    today_key = date.today().strftime("%Y%m%d")
+def load_cik_map(tickers: set) -> dict:
+    """ticker -> zero-padded CIK, for the tickers we care about today."""
+    data = json.loads(fetch(CIK_MAP_URL, SEC_UA).decode())
     out = {}
-    fresh_calls = 0
-    for sym in symbols:
-        hit = cache.get(sym)
-        if hit and (int(today_key) - int(hit[1])) <= 7:  # cache 7 days
-            out[sym] = hit[0] * 1e6 if hit[0] else None
-            continue
-        try:
-            prof = api("stock/profile2", {"symbol": sym})
-            mc = prof.get("marketCapitalization")  # in $ millions
-            cache[sym] = [mc, today_key]
-            out[sym] = mc * 1e6 if mc else None
-        except Exception:
-            out[sym] = None
-        fresh_calls += 1
-        if fresh_calls % 50 == 0:
-            time.sleep(60)  # stay under free-tier rate limit
-        else:
-            time.sleep(0.35)
-    save_json(MCAP_CACHE_FILE, cache)
+    for row in data.values():
+        t = row.get("ticker", "").upper()
+        if t in tickers:
+            out[t] = int(row.get("cik_str", 0))
     return out
 
 
-# ---- calendar ------------------------------------------------------------------
-def get_calendar(frm: date, to: date) -> list[dict]:
-    entries = []
+def edgar_recent_ciks() -> set:
+    """CIKs present in the latest real-time 8-K feed."""
     try:
-        data = api("calendar/earnings", {"from": frm.isoformat(), "to": to.isoformat(),
-                                         "international": "true"})
-        entries = data.get("earningsCalendar", []) or []
-    except Exception:
-        pass
-    if not entries:  # fallback without the international flag
-        data = api("calendar/earnings", {"from": frm.isoformat(), "to": to.isoformat()})
-        entries = data.get("earningsCalendar", []) or []
-    return entries
-
-
-def keep(entry: dict, mcap) -> bool:
-    """Filter: needs at least one estimate; mcap >= cutoff, or unknown mcap
-    but revenue est >= $1B."""
-    if entry.get("epsEstimate") is None and entry.get("revenueEstimate") is None:
-        return False  # nothing to show — skip
-    if mcap is not None:
-        return mcap >= MIN_MCAP_B * 1e9
-    rev = entry.get("revenueEstimate")
-    return rev is not None and float(rev) >= 1e9
-
-
-FLAG_CODE = {"🇺🇸": "US", "🇨🇳": "CN", "🇭🇰": "HK", "🇯🇵": "JP", "🇰🇷": "KR",
-             "🇬🇧": "GB", "🇪🇺": "EU", "🇨🇭": "CH", "🇳🇴": "NO", "🇨🇦": "CA",
-             "🇦🇺": "AU", "🇳🇿": "NZ", "🇧🇷": "BR", "🇲🇽": "MX", "🇮🇩": "ID",
-             "🇹🇭": "TH", "🇸🇬": "SG", "🇲🇾": "MY", "🇹🇼": "TW", "🇮🇳": "IN",
-             "🇹🇷": "TR", "🇮🇱": "IL", "🇿🇦": "ZA", "🌍": "INT"}
-
-TIME_CODE = {"bmo": "BMO", "amc": "AMC", "dmh": "MKT"}
-
-
-def num_short(x, money=True) -> str:
-    """Compact numbers for table columns: 780.0B / 15.2B / 3.30 / —"""
-    if x is None:
-        return "—"
-    try:
-        x = float(x)
-    except (TypeError, ValueError):
-        return "—"
-    a = abs(x)
-    if a >= 1e12:
-        return f"{x/1e12:.2f}T"
-    if a >= 1e9:
-        return f"{x/1e9:.1f}B"
-    if a >= 1e6:
-        return f"{x/1e6:.0f}M"
-    return f"{x:.2f}"
-
-
-TIME_WORD = {"bmo": "Before open", "amc": "After close", "dmh": "In market"}
-
-# ---- table rendered as image (clean, quarterchart-style) ----------------------
-DEJAVU = "/usr/share/fonts/truetype/dejavu"
-PLEX = Path(__file__).resolve().parent.parent / "fonts" / "IBMPlexSans.ttf"
-
-
-def _font(size: int, weight: int):
-    """IBM Plex Sans at the given weight; DejaVu fallback."""
-    from PIL import ImageFont
-    if PLEX.exists():
-        try:
-            f = ImageFont.truetype(str(PLEX), size)
-            f.set_variation_by_axes([weight, 100])  # [Weight, Width]
-            return f
-        except Exception:
-            pass
-    name = "DejaVuSans-Bold.ttf" if weight >= 600 else "DejaVuSans.ttf"
-    return ImageFont.truetype(f"{DEJAVU}/{name}", size)
-
-
-def ordinal(n: int) -> str:
-    if 11 <= n % 100 <= 13:
-        return f"{n}th"
-    return f"{n}" + {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
-
-
-TIME_PILL = {  # label, pill background, text color
-    "bmo": ("Before open", (219, 234, 254), (29, 78, 216)),
-    "amc": ("After close", (30, 41, 59), (255, 255, 255)),
-    "dmh": ("In market", (254, 243, 199), (146, 100, 8)),
-    "":    ("TBD", (238, 240, 243), (110, 118, 129)),
-}
-
-
-def render_day_image(day_iso: str, entries: list[dict], mcaps: dict) -> bytes:
-    from PIL import Image, ImageDraw
-    import io
-
-    # order: Before open first, then in-market, then After close, unknown last;
-    # inside each group, biggest market cap first
-    session_order = {"bmo": 0, "dmh": 1, "amc": 2}
-    rows = sorted(entries, key=lambda e: (session_order.get(e.get("hour", ""), 3),
-                                          -(mcaps.get(e.get("symbol")) or 0)))
-    W = 1180
-    title_h, header_h, row_h, bottom_pad = 92, 58, 62, 24
-    H = title_h + header_h + row_h * len(rows) + bottom_pad
-
-    img = Image.new("RGB", (W, H), (255, 255, 255))
-    d = ImageDraw.Draw(img)
-    f_title = _font(36, 700)
-    f_head  = _font(21, 700)
-    f_cell  = _font(23, 400)
-    f_tick  = _font(23, 700)
-    f_pill  = _font(18, 600)
-
-    dt = date.fromisoformat(day_iso)
-    d.text((40, 26), f"{dt.strftime('%A')}, {ordinal(dt.day)} {dt.strftime('%B')}",
-           font=f_title, fill=(17, 21, 28))
-
-    X_TICK, X_MCAP, X_EPS, X_REV, X_TIME = 50, 430, 660, 950, 1140
-    y = title_h
-    d.rounded_rectangle([30, y, W - 30, y + header_h], radius=10, fill=(246, 247, 249))
-    ty = y + 17
-    d.text((X_TICK, ty), "Company", font=f_head, fill=(31, 41, 55))
-    d.text((X_MCAP, ty), "Market cap", font=f_head, fill=(31, 41, 55), anchor="ra")
-    d.text((X_EPS, ty), "EPS estimate", font=f_head, fill=(31, 41, 55), anchor="ra")
-    d.text((X_REV, ty), "Revenue estimate", font=f_head, fill=(31, 41, 55), anchor="ra")
-    d.text((X_TIME, ty), "Timing", font=f_head, fill=(31, 41, 55), anchor="ra")
-
-    y += header_h
-    for i, e in enumerate(rows):
-        if i:
-            d.line([(30, y), (W - 30, y)], fill=(209, 215, 223), width=2)
-        cy = y + 17
-        sym = f"${e.get('symbol', '?')}"
-        d.text((X_TICK, cy), sym, font=f_tick, fill=(17, 21, 28))
-        d.text((X_MCAP, cy), fmt_money(mcaps.get(e.get("symbol"))), font=f_cell,
-               fill=(30, 34, 40), anchor="ra")
-        d.text((X_EPS, cy), fmt_eps(e.get("epsEstimate")), font=f_cell,
-               fill=(30, 34, 40), anchor="ra")
-        d.text((X_REV, cy), fmt_money(e.get("revenueEstimate")), font=f_cell,
-               fill=(30, 34, 40), anchor="ra")
-        d.text((X_TIME, cy), TIME_WORD.get(e.get("hour", ""), "TBD"), font=f_cell,
-               fill=(30, 34, 40), anchor="ra")
-        y += row_h
-
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return buf.getvalue()
-
-
-def post_image(png: bytes, filename: str, content: str = ""):
-    """Post an image to the Discord webhook (multipart upload)."""
-    import uuid
-    boundary = uuid.uuid4().hex
-    payload = {"content": content[:2000], "allowed_mentions": {"parse": []}}
-    body = (
-        f"--{boundary}\r\nContent-Disposition: form-data; name=\"payload_json\"\r\n"
-        f"Content-Type: application/json\r\n\r\n{json.dumps(payload)}\r\n"
-        f"--{boundary}\r\nContent-Disposition: form-data; name=\"files[0]\"; "
-        f"filename=\"{filename}\"\r\nContent-Type: image/png\r\n\r\n"
-    ).encode() + png + f"\r\n--{boundary}--\r\n".encode()
-    req = urllib.request.Request(
-        WEBHOOK, data=body,
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
-                 "User-Agent": "MrWallStreetBot"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return r.status
-
-
-def tickers_line(entries: list[dict]) -> str:
-    return " ".join(f"${e.get('symbol')}" for e in entries if e.get("symbol"))
-
-
-def build_day_images(entries: list[dict]):
-    """Returns [(day_iso, png_bytes, tickers_text)] for kept entries, grouped by day."""
-    if not entries:
-        return []
-    mcaps = get_mcaps(sorted({e["symbol"] for e in entries if e.get("symbol")}))
-    kept = [e for e in entries if keep(e, mcaps.get(e.get("symbol")))]
-    if not kept:
-        return []
-    by_day = defaultdict(list)
-    for e in kept:
-        by_day[e.get("date", "")].append(e)
-    return [(day, render_day_image(day, by_day[day], mcaps), tickers_line(by_day[day]))
-            for day in sorted(by_day)]
-
-
-
-
-# ---- text table (code block, quarterchart-style alignment) --------------------
-# COMPANY left-aligned; numbers right-aligned; 4-space gaps
-COLS = [("COMPANY", 10, "l"), ("MARKET CAP", 10, "r"), ("EPS ESTIMATE", 12, "r"),
-        ("REVENUE ESTIMATE", 16, "r"), ("TIMING", 11, "r")]
-GAP = "    "
-TABLE_WIDTH = sum(w for _, w, _ in COLS) + len(GAP) * (len(COLS) - 1)
-
-
-def _cell(s, w, a):
-    s = str(s)
-    if len(s) > w:
-        s = s[: w - 1] + "…"
-    return s.ljust(w) if a == "l" else s.rjust(w)
-
-
-def day_table_message(day_iso: str, entries: list[dict], mcaps: dict) -> str:
-    session_order = {"bmo": 0, "dmh": 1, "amc": 2}
-    rows = sorted(entries, key=lambda e: (session_order.get(e.get("hour", ""), 3),
-                                          -(mcaps.get(e.get("symbol")) or 0)))
-    dt = date.fromisoformat(day_iso)
-    title = f"__**{dt.strftime('%A')}, {ordinal(dt.day)} {dt.strftime('%B')}**__"
-    header = GAP.join(str(h).center(w) for h, w, _ in COLS)
-    sep = "─" * TABLE_WIDTH
-    lines = []
-    for e in rows:
-        cells = [f"${e.get('symbol', '?')}",
-                 fmt_money(mcaps.get(e.get("symbol"))),
-                 fmt_eps(e.get("epsEstimate")),
-                 fmt_money(e.get("revenueEstimate")),
-                 TIME_WORD.get(e.get("hour", ""), "TBD")]
-        lines.append(GAP.join(_cell(c, w, a) for c, (_, w, a) in zip(cells, COLS)))
-    return title + "\n```\n" + header + "\n" + sep + "\n" + "\n".join(lines) + "\n```"
-
-
-def build_day_messages(entries: list[dict]) -> list[str]:
-    if not entries:
-        return []
-    mcaps = get_mcaps(sorted({e["symbol"] for e in entries if e.get("symbol")}))
-    kept = [e for e in entries if keep(e, mcaps.get(e.get("symbol")))]
-    if not kept:
-        return []
-    by_day = defaultdict(list)
-    for e in kept:
-        by_day[e.get("date", "")].append(e)
-    msgs = []
-    for day in sorted(by_day):
-        msgs.extend(split_table_message(day_table_message(day, by_day[day], mcaps)))
-    return msgs
-
-
-def split_table_message(msg: str) -> list[str]:
-    """Split an over-long day table into <=1900-char chunks, repeating the header."""
-    if len(msg) <= 1900:
-        return [msg]
-    head, _, body = msg.partition("```\n")
-    body = body.rsplit("```", 1)[0]
-    lines = body.split("\n")
-    header, sep, rows = lines[0], lines[1], [r for r in lines[2:] if r.strip()]
-    out, batch, first = [], [], True
-    for row in rows:
-        batch.append(row)
-        if sum(len(r) + 1 for r in batch) > 1500:
-            out.append((head if first else "") + "```\n" + header + "\n" + sep + "\n" + "\n".join(batch) + "\n```")
-            first, batch = False, []
-    if batch:
-        out.append((head if first else "") + "```\n" + header + "\n" + sep + "\n" + "\n".join(batch) + "\n```")
-    return out
-
-
-# ---- modes ----------------------------------------------------------------------
-def preview():
-    today = date.today()
-    monday = today + timedelta(days=(7 - today.weekday()) % 7 or 7)
-    friday = monday + timedelta(days=4)
-    entries = get_calendar(monday, friday)
-    msgs = build_day_messages(entries)
-    if not msgs:
-        print("Nothing above the cutoff next week.")
-        return
-    post_to_discord("**WEEKLY CALENDAR**")
-    time.sleep(1)
-    send_messages(msgs)
-
-
-def today_mode():
-    t = date.today()
-    entries = [e for e in get_calendar(t, t) if e.get("date") == t.isoformat()]
-    msgs = build_day_messages(entries)
-    if not msgs:
-        print("No earnings above the cutoff today.")
-        return
-    post_to_discord("**TODAY'S CALENDAR**")
-    time.sleep(1)
-    send_messages(msgs)
-
-
-def results():
-    t = date.today()
-    entries = get_calendar(t - timedelta(days=1), t)
-    reported = set(load_json(REPORTED_FILE, []))
-    candidates = [e for e in entries if e.get("epsActual") is not None
-                  and f"{e.get('symbol')}:{e.get('date')}" not in reported]
-    if not candidates:
-        print("No new results.")
-        return
-    mcaps = get_mcaps(sorted({e["symbol"] for e in candidates if e.get("symbol")}))
-    fresh = []
-    for e in candidates:
-        sym = e.get("symbol")
-        key = f"{sym}:{e.get('date')}"
-        if not keep(e, mcaps.get(sym)):
-            reported.add(key)  # below cutoff — never post it
-            continue
-        reported.add(key)
-        eps_a, eps_e = e.get("epsActual"), e.get("epsEstimate")
-        rev_a, rev_e = e.get("revenueActual"), e.get("revenueEstimate")
-        beat = eps_e is not None and eps_a is not None and float(eps_a) >= float(eps_e)
-        emoji, verdict = ("🟢", "BEAT") if beat else ("🔴", "MISS")
-        fresh.append(
-            f"{emoji} **${sym}** — **{verdict}**\n"
-            f"   EPS: **{fmt_eps(eps_a)}** vs est {fmt_eps(eps_e)} ({pct_s(eps_a, eps_e)})\n"
-            f"   Revenue: **{fmt_money(rev_a)}** vs est {fmt_money(rev_e)} ({pct_s(rev_a, rev_e)})"
-        )
-    if fresh:
-        send_chunked(["💰 **EARNINGS JUST REPORTED**", ""] + fresh)
-    else:
-        print("No new results above the cutoff.")
-    save_json(REPORTED_FILE, sorted(reported)[-2000:])
-
-
-
-
-# ---- daily & weekly recap (actuals vs estimates) -------------------------------
-def pct_s(actual, est) -> str:
-    """Surprise percentage: +4.5% / -2.1% / —"""
-    try:
-        actual, est = float(actual), float(est)
-    except (TypeError, ValueError):
-        return "—"
-    if est == 0:
-        return "—"
-    p = (actual - est) / abs(est) * 100
-    return f"{'+' if p >= 0 else ''}{p:.1f}%"
-
-
-RECAP_COLS = [("COMPANY", 10, "l"), ("EPS ACTUAL", 10, "r"), ("EPS +/-", 8, "r"),
-              ("REVENUE", 10, "r"), ("REV +/-", 8, "r")]
-RECAP_WIDTH = sum(w for _, w, _ in RECAP_COLS) + len(GAP) * (len(RECAP_COLS) - 1)
-
-
-def recap_table_message(day_iso: str, entries: list[dict], mcaps: dict) -> str:
-    rows = sorted(entries, key=lambda e: -(mcaps.get(e.get("symbol")) or 0))
-    dt = date.fromisoformat(day_iso)
-    title = f"__**{dt.strftime('%A')}, {ordinal(dt.day)} {dt.strftime('%B')}**__"
-    header = GAP.join(str(h).center(w) for h, w, _ in RECAP_COLS)
-    sep = "─" * RECAP_WIDTH
-    lines = []
-    for e in rows:
-        cells = [f"${e.get('symbol', '?')}",
-                 fmt_eps(e.get("epsActual")),
-                 pct_s(e.get("epsActual"), e.get("epsEstimate")),
-                 fmt_money(e.get("revenueActual")),
-                 pct_s(e.get("revenueActual"), e.get("revenueEstimate"))]
-        lines.append(GAP.join(_cell(c, w, a) for c, (_, w, a) in zip(cells, RECAP_COLS)))
-    return title + "\n```\n" + header + "\n" + sep + "\n" + "\n".join(lines) + "\n```"
-
-
-def _reported_between(frm: date, to: date) -> list[dict]:
-    entries = [e for e in get_calendar(frm, to) if e.get("epsActual") is not None]
-    if not entries:
-        return []
-    mcaps = get_mcaps(sorted({e["symbol"] for e in entries if e.get("symbol")}))
-    return [e for e in entries if keep(e, mcaps.get(e.get("symbol")))], mcaps
-
-
-def recap():
-    """End of day: table of everything that reported today (ET).
-
-    Anchored: the intended post time is ~21:00 ET. If GitHub fires us hours
-    late and we cross midnight ET, (now - 8h) still lands on the day we were
-    meant to recap - never the day that hasn't happened yet."""
-    from zoneinfo import ZoneInfo
-    from datetime import datetime as _dt
-    today_et = (_dt.now(ZoneInfo("America/New_York")) - timedelta(hours=8)).date()
-    result = _reported_between(today_et, today_et)
-    if not result or not result[0]:
-        print("Nothing reported today.")
-        return
-    kept, mcaps = result
-    post_to_discord("**DAILY RECAP**")
-    time.sleep(1)
-    send_messages([recap_table_message(today_et.isoformat(),
-                                       [e for e in kept if e.get("date") == today_et.isoformat()],
-                                       mcaps)])
-
-
-def week_recap():
-    """Friday night: table of the whole week's results, grouped by day.
-    Anchored to (now - 8h) so a late start never rolls into Saturday."""
-    from zoneinfo import ZoneInfo
-    from datetime import datetime as _dt
-    today_et = (_dt.now(ZoneInfo("America/New_York")) - timedelta(hours=8)).date()
-    monday = today_et - timedelta(days=today_et.weekday())
-    result = _reported_between(monday, today_et)
-    if not result or not result[0]:
-        print("Nothing reported this week.")
-        return
-    kept, mcaps = result
-    by_day = defaultdict(list)
-    for e in kept:
-        by_day[e.get("date", "")].append(e)
-    post_to_discord("**WEEKLY RECAP**")
-    time.sleep(1)
-    send_messages([recap_table_message(day, by_day[day], mcaps) for day in sorted(by_day)])
+        xml = fetch(EDGAR_FEED, SEC_UA).decode(errors="replace")
+    except Exception as e:
+        print(f"[warn] EDGAR feed failed: {e}")
+        return set()
+    return {int(m) for m in re.findall(r"\((\d{10})\)", xml)}
 
 
 def main():
-    if not WEBHOOK:
-        sys.exit("Missing DISCORD_WEBHOOK_STOCK_EARNINGS env var")
-    if not API_KEY:
-        sys.exit("Missing FINNHUB_API_KEY env var")
-    mode = sys.argv[1] if len(sys.argv) > 1 else "results"
-    if mode == "preview":
-        preview()
-    elif mode == "today":
-        today_mode()
-    elif mode == "results":
-        results()
-    elif mode == "recap":
-        recap()
-    elif mode == "weekrecap":
-        week_recap()
-    else:
-        sys.exit(f"Unknown mode: {mode} (use 'preview', 'today', 'results', 'recap' or 'weekrecap')")
+    if not E.WEBHOOK or not E.API_KEY:
+        sys.exit("Missing DISCORD_WEBHOOK_STOCK_EARNINGS or FINNHUB_API_KEY")
+
+    et_now = datetime.now(ZoneInfo("America/New_York"))
+    today = et_now.date()
+    deadline = time.time() + LIVE_MINUTES * 60
+
+    # --- session setup: who is expected to report today? -----------------------
+    entries = E.get_calendar(today - timedelta(days=1), today)
+    symbols = sorted({e["symbol"] for e in entries if e.get("symbol")})
+    mcaps = E.get_mcaps(symbols)
+    expected = [e for e in entries if E.keep(e, mcaps.get(e.get("symbol")))]
+    exp_tickers = {e["symbol"] for e in expected}
+    print(f"Session start {et_now:%F %T} ET — watching {len(exp_tickers)} companies: "
+          f"{' '.join(sorted(exp_tickers)) or '(none)'}")
+    if not exp_tickers:
+        return
+
+    cik_by_ticker = {}
+    try:
+        cik_by_ticker = load_cik_map(exp_tickers)
+    except Exception as e:
+        print(f"[warn] CIK map failed ({e}) — EDGAR alerts disabled this session")
+    ticker_by_cik = {v: k for k, v in cik_by_ticker.items()}
+
+    alerted = set(E.load_json(ALERTED_FILE, []))
+    reported = set(E.load_json(E.REPORTED_FILE, []))
+
+    # Seed: whatever is ALREADY in the EDGAR feed at startup was not filed "just
+    # now" - mark it seen silently so a late-started session never lies with
+    # "has just reported". Only filings appearing AFTER this moment get the alert.
+    if ticker_by_cik:
+        try:
+            for cik in edgar_recent_ciks() & set(ticker_by_cik):
+                alerted.add(f"{ticker_by_cik[cik]}:{today.isoformat()}")
+            print(f"Seeded {len(alerted)} pre-session filings (no alerts for those).")
+        except Exception as e:
+            print(f"[warn] EDGAR seed failed: {e}")
+
+    # --- live loop --------------------------------------------------------------
+    while time.time() < deadline:
+        # Layer 1: EDGAR instant alerts
+        if ticker_by_cik:
+            for cik in edgar_recent_ciks() & set(ticker_by_cik):
+                sym = ticker_by_cik[cik]
+                key = f"{sym}:{today.isoformat()}"
+                if key in alerted:
+                    continue
+                alerted.add(key)
+                try:
+                    E.post_to_discord(f"🚨 **${sym} has just reported earnings** — numbers incoming...")
+                    print(f"ALERT {sym}")
+                except Exception as e:
+                    print(f"[warn] alert post failed: {e}")
+
+        # Layer 2: Finnhub actuals
+        try:
+            cal = E.get_calendar(today - timedelta(days=1), today)
+        except Exception as e:
+            print(f"[warn] finnhub poll failed: {e}")
+            cal = []
+        for e in cal:
+            sym = e.get("symbol")
+            key = f"{sym}:{e.get('date')}"
+            if sym not in exp_tickers or key in reported or e.get("epsActual") is None:
+                continue
+            reported.add(key)
+            eps_a, eps_e = e.get("epsActual"), e.get("epsEstimate")
+            rev_a, rev_e = e.get("revenueActual"), e.get("revenueEstimate")
+            beat = eps_e is not None and eps_a is not None and float(eps_a) >= float(eps_e)
+            emoji, verdict = ("🟢", "BEAT") if beat else ("🔴", "MISS")
+            try:
+                E.post_to_discord(
+                    f"{emoji} **${sym}** — **{verdict}**\n"
+                    f"   EPS: **{E.fmt_eps(eps_a)}** vs est {E.fmt_eps(eps_e)} ({E.pct_s(eps_a, eps_e)})\n"
+                    f"   Revenue: **{E.fmt_money(rev_a)}** vs est {E.fmt_money(rev_e)} ({E.pct_s(rev_a, rev_e)})"
+                )
+                print(f"NUMBERS {sym}")
+            except Exception as ex:
+                print(f"[warn] numbers post failed: {ex}")
+                reported.discard(key)  # retry next cycle
+
+        time.sleep(POLL_SECONDS)
+
+    # --- persist state ------------------------------------------------------------
+    E.save_json(ALERTED_FILE, sorted(alerted)[-1000:])
+    E.save_json(E.REPORTED_FILE, sorted(reported)[-2000:])
+    print("Session ended.")
 
 
 if __name__ == "__main__":
-    main()
+    main()()
