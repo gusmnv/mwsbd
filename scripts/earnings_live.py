@@ -28,7 +28,8 @@ import earnings as E  # reuse api(), get_calendar(), get_mcaps(), keep(), format
 
 import os
 LIVE_MINUTES = int(os.environ.get("LIVE_MINUTES", "120"))
-POLL_SECONDS = 20
+POLL_SECONDS = 2          # EDGAR checked every cycle (2s) — instant BREAKING alerts
+FINNHUB_EVERY = 8         # Finnhub numbers checked every 8th cycle (~16s), respects rate limits
 
 STATE_DIR = Path(__file__).resolve().parent.parent / "state"
 ALERTED_FILE = STATE_DIR / "edgar_alerted.json"
@@ -107,8 +108,9 @@ def main():
             print(f"[warn] EDGAR seed failed: {e}")
 
     # --- live loop --------------------------------------------------------------
+    cycle = 0
     while time.time() < deadline:
-        # Layer 1: EDGAR instant alerts
+        # Layer 1: EDGAR instant alerts (every cycle, 2s)
         if ticker_by_cik:
             for cik in edgar_recent_ciks() & set(ticker_by_cik):
                 sym = ticker_by_cik[cik]
@@ -117,12 +119,16 @@ def main():
                     continue
                 alerted.add(key)
                 try:
-                    E.post_to_discord(f"🚨 **${sym} has just reported earnings** — numbers incoming...")
+                    E.post_to_discord(f"🚨 **BREAKING: ${sym} reported earnings just now** — numbers incoming...")
                     print(f"ALERT {sym}")
                 except Exception as e:
                     print(f"[warn] alert post failed: {e}")
 
-        # Layer 2: Finnhub actuals
+        # Layer 2: Finnhub actuals (throttled to every FINNHUB_EVERY cycles)
+        cycle += 1
+        if cycle % FINNHUB_EVERY != 1:
+            time.sleep(POLL_SECONDS)
+            continue
         try:
             cal = E.get_calendar(today - timedelta(days=1), today)
         except Exception as e:

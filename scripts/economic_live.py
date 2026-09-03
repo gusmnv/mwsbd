@@ -29,7 +29,8 @@ WEBHOOK = os.environ.get("DISCORD_WEBHOOK_ECONOMIC_DATA", "").strip()
 BLS_KEY = os.environ.get("BLS_API_KEY", "").strip()
 BEA_KEY = os.environ.get("BEA_API_KEY", "").strip()
 LIVE_MINUTES = int(os.environ.get("LIVE_MINUTES") or "105")
-POLL_SECONDS = 15
+POLL_SECONDS = 15   # relaxed cadence away from release times
+POLL_FAST = 1       # burst cadence in the hot window around each release (HORÁRIO É CHAVE)
 
 FEED_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 STATE_DIR = Path(__file__).resolve().parent.parent / "state"
@@ -336,7 +337,13 @@ def main():
                 w["done"] = True
             except Exception as e:
                 print(f"[warn] discord post failed: {e}")
-        time.sleep(POLL_SECONDS)
+        # Burst mode: poll every second from 45s before a release until it is
+        # captured (or 10 min pass); otherwise relax to protect API quotas.
+        hot = any(
+            (not w["done"]) and (w["dt"] - timedelta(seconds=45) <= now <= w["dt"] + timedelta(minutes=10))
+            for w in watch
+        )
+        time.sleep(POLL_FAST if hot else POLL_SECONDS)
 
     save_json(ACTUALS_FILE, actuals)
     print("Session ended. Captured:", sum(1 for w in watch if w["done"]), "/", len(watch))
