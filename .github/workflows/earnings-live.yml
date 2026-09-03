@@ -26,6 +26,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Wait until session start (11:00 or 20:00 UTC sharp)
+        id: cfg
         run: |
           now=$(date -u +%s)
           t1=$(date -u -d "today 11:00 UTC" +%s)
@@ -35,10 +36,11 @@ jobs:
           elif [ "$now" -ge "$t1" ] && [ "$now" -lt "$((t1+TOL))" ]; then target=$now; echo "LATE: joining morning session $(( (now-t1)/60 )) min late"
           elif [ "$now" -lt "$t2" ] && [ "$((t2-now))" -le "$TOL" ]; then target=$t2
           elif [ "$now" -ge "$t2" ] && [ "$now" -lt "$((t2+TOL))" ]; then target=$now; echo "LATE: joining evening session $(( (now-t2)/60 )) min late"
-          elif [ "$now" -lt "$t2" ]; then echo "Missed the morning window; evening is $(( (t2-now)/60 )) min away - skipping, never sleeping across sessions"; exit 0
-          else echo "Too late for any session today - skipping"; exit 0; fi
+          elif [ "$now" -lt "$t2" ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; echo "Missed the morning window; evening is $(( (t2-now)/60 )) min away - skipping, never sleeping across sessions"; exit 0
+          else echo "skip=true" >> "$GITHUB_OUTPUT"; echo "Too late for any session today - skipping"; exit 0; fi
           [ "$target" -gt "$now" ] && { echo "Sleeping $((target-now))s"; sleep $((target-now)); } || true
       - name: Live earnings watch (EDGAR + Finnhub)
+        if: steps.cfg.outputs.skip != 'true'
         env:
           DISCORD_WEBHOOK_STOCK_EARNINGS: ${{ secrets.DISCORD_WEBHOOK_STOCK_EARNINGS }}
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
