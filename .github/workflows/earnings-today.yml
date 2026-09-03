@@ -3,7 +3,7 @@ name: earnings-today
 on:
   schedule:
     # 10:00 UTC = 14:00 Dubai = 06:00 New York, Mon-Fri — today's earnings table
-    - cron: "23 9 * * 1-5"
+    - cron: "41 23 * * 0-4"
   workflow_dispatch: {}
 
 permissions:
@@ -21,15 +21,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Wait until exact post time
+      - name: Wait until 00:00 UTC (daily earnings calendar, the moment the UTC day starts)
         run: |
-          target=$(date -u -d "today 10:00 UTC" +%s)
           now=$(date -u +%s)
-          if [ "$now" -lt "$target" ]; then
-            echo "Sleeping $((target-now))s until 10:00 UTC sharp"
-            sleep $((target-now))
+          prev=$(date -u -d "today 00:00 UTC" +%s)
+          next=$(date -u -d "tomorrow 00:00 UTC" +%s)
+          if [ "$((now-prev))" -lt 3600 ]; then
+            echo "Within the first hour after 00:00 UTC - posting now"
+          elif [ "$((next-now))" -le 5400 ]; then
+            echo "Sleeping $((next-now))s until 00:00 UTC sharp"
+            sleep $((next-now))
           else
-            echo "LATE START: $(( (now-target)/60 )) min after target — posting anyway"
+            echo "Dispatched mid-day - posting now rather than waiting $((next-now))s"
           fi
       - name: Install dependencies
         run: |
