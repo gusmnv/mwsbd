@@ -28,7 +28,7 @@ from zoneinfo import ZoneInfo
 WEBHOOK = os.environ.get("DISCORD_WEBHOOK_ECONOMIC_DATA", "").strip()
 BLS_KEY = os.environ.get("BLS_API_KEY", "").strip()
 BEA_KEY = os.environ.get("BEA_API_KEY", "").strip()
-LIVE_MINUTES = int(os.environ.get("LIVE_MINUTES", "105"))
+LIVE_MINUTES = int(os.environ.get("LIVE_MINUTES") or "105")
 POLL_SECONDS = 15
 
 FEED_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
@@ -168,6 +168,14 @@ class BLSHandler:
         v = self.calc(rows)
         return None if v is None else (v, self.unit)
 
+    def value_latest(self):
+        """Latest published value, no snapshot needed (recap-time backfill)."""
+        rows = bls_series([self.series]).get(self.series, [])
+        if not rows:
+            return None
+        v = self.calc(rows)
+        return None if v is None else (v, self.unit)
+
 
 class BEAHandler:
     def __init__(self, table, freq, line_re, unit="%"):
@@ -184,6 +192,10 @@ class BEAHandler:
         if not r or not self.before or r[0] == self.before:
             return None
         return (r[1], self.unit)
+
+    def value_latest(self):
+        r = bea_latest(*self.args)
+        return None if not r else (r[1], self.unit)
 
 
 class FedHandler:
