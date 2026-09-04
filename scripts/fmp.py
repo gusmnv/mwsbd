@@ -17,7 +17,11 @@ import urllib.request
 from datetime import datetime, timezone
 
 API_KEY = os.environ.get("FMP_API_KEY", "").strip()
-BASE = "https://financialmodelingprep.com/api/v3/economic_calendar"
+# New FMP accounts use the "stable" API; v3 is legacy-only (403 for new keys).
+BASES = [
+    "https://financialmodelingprep.com/stable/economic-calendar",
+    "https://financialmodelingprep.com/api/v3/economic_calendar",
+]
 
 # ForexFactory currency -> FMP country codes
 CUR2COUNTRIES = {
@@ -55,15 +59,17 @@ def fetch(day_from, day_to, timeout=20):
     """All FMP calendar rows between the two ISO dates (inclusive). [] on any problem."""
     if not API_KEY:
         return []
-    url = f"{BASE}?from={day_from}&to={day_to}&apikey={API_KEY}"
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "MrWallStreetBot"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            data = json.loads(r.read().decode())
-        return data if isinstance(data, list) else []
-    except Exception as e:
-        print(f"[warn] FMP fetch failed: {e}")
-        return []
+    for base in BASES:
+        url = f"{base}?from={day_from}&to={day_to}&apikey={API_KEY}"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "MrWallStreetBot"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                data = json.loads(r.read().decode())
+            if isinstance(data, list):
+                return data
+        except Exception as e:
+            print(f"[warn] FMP fetch failed ({base.split('/')[3]}): {e}")
+    return []
 
 
 def find_actual(rows, title, currency, when_utc=None, tol_minutes=90):
