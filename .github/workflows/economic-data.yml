@@ -1,9 +1,7 @@
 name: economic-data
 
 on:
-  schedule:
-    # Sunday 12:00 UTC = 16:00 Dubai — week-ahead economic calendar
-    - cron: "47 23 * * 6"
+  # external dispatch via cron-job.org (exact-time). GitHub cron removed: it ran 3-4h late and duplicated posts.
   workflow_dispatch: {}
 
 jobs:

@@ -1,9 +1,7 @@
 name: earnings-recap-weekly
 
 on:
-  schedule:
-    # 01:30 UTC Saturday = 21:30 ET Friday — 30 min after Friday's daily recap
-    - cron: "51 0 * * 6"
+  # external dispatch via cron-job.org (exact-time). GitHub cron removed: it ran 3-4h late and duplicated posts.
   workflow_dispatch: {}
 
 jobs:

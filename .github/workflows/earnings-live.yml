@@ -1,12 +1,7 @@
 name: earnings-live
 
 on:
-  schedule:
-    # Live sessions (UTC), Mon-Fri:
-    # 11:00 UTC = 07:00 ET  → pre-market session (2h10)
-    # 20:00 UTC = 16:00 ET  → after-hours session (2h10)
-    - cron: "21 10 * * 1-5"
-    - cron: "21 19 * * 1-5"
+  # external dispatch via cron-job.org (exact-time). GitHub cron removed: it ran 3-4h late and duplicated posts.
   workflow_dispatch: {}
 
 permissions:
@@ -19,32 +14,33 @@ concurrency:
 jobs:
   watch:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 235
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Wait until session start (11:00 or 20:00 UTC sharp)
+      - name: Wait until session start (10:00 or 20:00 UTC sharp)
         id: cfg
         run: |
           now=$(date -u +%s)
-          t1=$(date -u -d "today 11:00 UTC" +%s)
-          t2=$(date -u -d "today 20:00 UTC" +%s)
+          t1=$(date -u -d "today 10:00 UTC" +%s)   # 06:00 ET - pre-market reporters start here
+          t2=$(date -u -d "today 20:00 UTC" +%s)   # 16:00 ET - after-hours session
           TOL=5400   # <=90 min late still joins its own session; later than that, skip
-          if   [ "$now" -lt "$t1" ] && [ "$((t1-now))" -le "$TOL" ]; then target=$t1
-          elif [ "$now" -ge "$t1" ] && [ "$now" -lt "$((t1+TOL))" ]; then target=$now; echo "LATE: joining morning session $(( (now-t1)/60 )) min late"
-          elif [ "$now" -lt "$t2" ] && [ "$((t2-now))" -le "$TOL" ]; then target=$t2
-          elif [ "$now" -ge "$t2" ] && [ "$now" -lt "$((t2+TOL))" ]; then target=$now; echo "LATE: joining evening session $(( (now-t2)/60 )) min late"
-          elif [ "$now" -lt "$t2" ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; echo "Missed the morning window; evening is $(( (t2-now)/60 )) min away - skipping, never sleeping across sessions"; exit 0
-          else echo "skip=true" >> "$GITHUB_OUTPUT"; echo "Too late for any session today - skipping"; exit 0; fi
+          if   [ "$now" -lt "$t1" ] && [ "$((t1-now))" -le "$TOL" ]; then target=$t1; mins=210
+          elif [ "$now" -ge "$t1" ] && [ "$now" -lt "$((t1+TOL))" ]; then target=$now; mins=$(( (t1+12600-now)/60 )); echo "LATE: joining morning session $(( (now-t1)/60 )) min late"
+          elif [ "$now" -lt "$t2" ] && [ "$((t2-now))" -le "$TOL" ]; then target=$t2; mins=115
+          elif [ "$now" -ge "$t2" ] && [ "$now" -lt "$((t2+TOL))" ]; then target=$now; mins=$(( (t2+6900-now)/60 )); echo "LATE: joining evening session $(( (now-t2)/60 )) min late"
+          elif [ "$now" -lt "$t2" ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; echo "mins=0" >> "$GITHUB_OUTPUT"; echo "Missed the morning window; evening is $(( (t2-now)/60 )) min away - skipping, never sleeping across sessions"; exit 0
+          else echo "skip=true" >> "$GITHUB_OUTPUT"; echo "mins=0" >> "$GITHUB_OUTPUT"; echo "Too late for any session today - skipping"; exit 0; fi
+          echo "mins=$mins" >> "$GITHUB_OUTPUT"
           [ "$target" -gt "$now" ] && { echo "Sleeping $((target-now))s"; sleep $((target-now)); } || true
       - name: Live earnings watch (EDGAR + Finnhub)
         if: steps.cfg.outputs.skip != 'true'
         env:
           DISCORD_WEBHOOK_STOCK_EARNINGS: ${{ secrets.DISCORD_WEBHOOK_STOCK_EARNINGS }}
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
-          LIVE_MINUTES: "130"
+          LIVE_MINUTES: ${{ steps.cfg.outputs.mins }}
           MIN_MCAP_B: "5"
         run: python scripts/earnings_live.py
       - name: Save state

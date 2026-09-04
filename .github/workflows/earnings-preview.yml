@@ -1,9 +1,7 @@
 name: earnings-preview
 
 on:
-  schedule:
-    # Sunday 12:05 UTC = 16:05 Dubai — week-ahead earnings calendar
-    - cron: "41 23 * * 6"
+  # external dispatch via cron-job.org (exact-time). GitHub cron removed: it ran 3-4h late and duplicated posts.
   workflow_dispatch: {}
 
 jobs:

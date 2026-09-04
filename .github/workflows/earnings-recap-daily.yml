@@ -1,9 +1,7 @@
 name: earnings-recap-daily
 
 on:
-  schedule:
-    # 01:00 UTC Tue-Sat = 21:00 ET Mon-Fri — after the after-hours reports are in
-    - cron: "21 0 * * 2-6"
+  # external dispatch via cron-job.org (exact-time). GitHub cron removed: it ran 3-4h late and duplicated posts.
   workflow_dispatch: {}
 
 jobs:
@@ -16,10 +14,12 @@ jobs:
           python-version: "3.12"
       - name: Wait until exact post time
         run: |
-          target=$(date -u -d "today 01:00 UTC" +%s)
+          # 22:00 UTC sharp = 2h after NY close. Recap ALWAYS lands before the
+          # next day's calendar (00:00 UTC). HORARIO E CHAVE.
+          target=$(date -u -d "today 22:00 UTC" +%s)
           now=$(date -u +%s)
           if [ "$now" -lt "$target" ]; then
-            echo "Sleeping $((target-now))s until 01:00 UTC sharp"
+            echo "Sleeping $((target-now))s until 22:00 UTC sharp"
             sleep $((target-now))
           else
             echo "LATE START: $(( (now-target)/60 )) min after target — posting anyway"

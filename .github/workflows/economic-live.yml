@@ -1,11 +1,7 @@
 name: economic-live
 
 on:
-  schedule:
-    # Morning session: starts 12:25 UTC sharp (08:25 ET), 105 min — covers 8:30 & 10:00 releases
-    - cron: "47 11 * * 1-5"
-    # Afternoon check: starts 17:55 UTC sharp (13:55 ET), 15 min — FOMC days
-    - cron: "17 17 * * 1-5"
+  # external dispatch via cron-job.org (exact-time). GitHub cron removed: it ran 3-4h late and duplicated posts.
   workflow_dispatch: {}
 
 permissions:

@@ -1,9 +1,7 @@
 name: economic-recap-daily
 
 on:
-  schedule:
-    # 01:05 UTC Tue-Sat = 21:05 ET Mon-Fri (right after the earnings daily recap)
-    - cron: "27 0 * * 2-6"
+  # external dispatch via cron-job.org (exact-time). GitHub cron removed: it ran 3-4h late and duplicated posts.
   workflow_dispatch: {}
 
 jobs:
@@ -16,7 +14,9 @@ jobs:
           python-version: "3.12"
       - name: Wait until exact post time
         run: |
-          target=$(date -u -d "today 01:05 UTC" +%s)
+          # 22:10 UTC sharp, right after the earnings daily recap (22:00) and
+          # always before the next day's calendar (00:00 UTC).
+          target=$(date -u -d "today 22:10 UTC" +%s)
           now=$(date -u +%s)
           [ "$now" -lt "$target" ] && sleep $((target-now)) || true
       - name: Post daily economic recap
@@ -25,7 +25,5 @@ jobs:
           BLS_API_KEY: ${{ secrets.BLS_API_KEY }}
           BEA_API_KEY: ${{ secrets.BEA_API_KEY }}
         run: python scripts/economic_data.py recap
-      - name: Post tomorrow's economic calendar
-        env:
-          DISCORD_WEBHOOK_ECONOMIC_DATA: ${{ secrets.DISCORD_WEBHOOK_ECONOMIC_DATA }}
-        run: python scripts/economic_data.py tomorrow
+      # tomorrow's calendar step removed: economic-today posts the day's calendar
+      # at 00:00 UTC sharp, so posting it here at 22:10 would duplicate it.

@@ -1,9 +1,7 @@
 name: economic-today
 
 on:
-  schedule:
-    # 04:05 UTC = 00:05 ET — start of each ET day, Mon-Sat (Sat catches Friday-night Asia)
-    - cron: "47 23 * * 0-4"
+  # external dispatch via cron-job.org (exact-time). GitHub cron removed: it ran 3-4h late and duplicated posts.
   workflow_dispatch: {}
 
 jobs:
