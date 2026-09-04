@@ -21,6 +21,7 @@ from collections import defaultdict
 from datetime import datetime
 
 FEED_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+NEXTWEEK_URL = "https://nfs.faireconomy.media/ff_calendar_nextweek.json"
 WEBHOOK = os.environ.get("DISCORD_WEBHOOK_ECONOMIC_DATA", "").strip()
 IMPACTS = {i.strip().title() for i in os.environ.get("ECON_IMPACTS", "High,Medium").split(",")}
 
@@ -31,8 +32,8 @@ def ordinal(n: int) -> str:
     return f"{n}" + {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
 
 
-def fetch_events(retries=3):
-    req = urllib.request.Request(FEED_URL, headers={"User-Agent": "Mozilla/5.0 (MrWallStreetBot)"})
+def fetch_events(retries=3, url=FEED_URL):
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (MrWallStreetBot)"})
     last = None
     for attempt in range(retries):
         try:
@@ -213,14 +214,20 @@ def main():
         return
 
     if mode == "today":
-        from zoneinfo import ZoneInfo
-        today_et = datetime.now(ZoneInfo("America/New_York")).date()
-        if today_et not in by_day:
-            print("No events today.")
-            return
+        # HORARIO E CHAVE: the calendar day is the UTC day (posted at 00:00 UTC
+        # sharp). The +30min bias guards the just-before-midnight dispatch race,
+        # so a run starting 23:5x still posts the NEW day's calendar.
+        from datetime import timedelta as _td, timezone as _tz
+        today_utc = (datetime.now(_tz.utc) + _td(minutes=30)).date()
+        if today_utc not in by_day:
+            # UTC day may live in next week's ET feed (Sunday 00:00 UTC case)
+            by_day = parse(fetch_events(url=NEXTWEEK_URL))
+            if today_utc not in by_day:
+                print("No events today.")
+                return
         post_text("**TODAY'S CALENDAR**")
         time.sleep(1)
-        for chunk in split_message(day_table_message(today_et, by_day[today_et])):
+        for chunk in split_message(day_table_message(today_utc, by_day[today_utc])):
             status = post_text(chunk)
             print(f"Posted today chunk (HTTP {status}).")
             time.sleep(1)
@@ -277,6 +284,15 @@ def main():
                     print(f"Posted {day} recap (HTTP {post_text(chunk)}).")
                     time.sleep(1)
         return
+
+    # Weekly calendar posts at 00:00 UTC Sunday (= Saturday evening ET), when
+    # the "thisweek" feed still holds the ENDING week - roll to nextweek feed.
+    from datetime import timedelta as _tdw, timezone as _tzw
+    _today_utc = (datetime.now(_tzw.utc) + _tdw(minutes=30)).date()
+    if not by_day or max(by_day) <= _today_utc:
+        nb = parse(fetch_events(url=NEXTWEEK_URL))
+        if nb:
+            by_day = nb
 
     days = sorted(by_day)
     post_text("**WEEKLY CALENDAR**")
