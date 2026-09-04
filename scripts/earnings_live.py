@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import earnings as E  # reuse api(), get_calendar(), get_mcaps(), keep(), formatters, posting
 
 import os
-LIVE_MINUTES = int(os.environ.get("LIVE_MINUTES", "120"))
+LIVE_MINUTES = int(os.environ.get("LIVE_MINUTES") or "120")  # 'or' guards empty-string env
 POLL_SECONDS = 2          # EDGAR checked every cycle (2s) — instant BREAKING alerts
 FINNHUB_EVERY = 8         # Finnhub numbers checked every 8th cycle (~16s), respects rate limits
 
