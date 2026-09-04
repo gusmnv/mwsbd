@@ -278,8 +278,6 @@ def main():
     events = json.loads(http_get(FEED_URL).decode())
     watch = []
     for ev in events:
-        if ev.get("country", "").upper() != "USD":
-            continue
         if ev.get("impact", "").title() != "High":
             continue
         try:
@@ -288,26 +286,68 @@ def main():
             continue
         if dt.date() != today or not (now_et - timedelta(minutes=10) <= dt <= session_end_et):
             continue
-        h = match_handler(ev.get("title", ""))
-        if h:
-            watch.append({"ev": ev, "dt": dt, "h": h, "done": False})
+        cur = ev.get("country", "").upper()
+        # USD majors: official-API handler with 1s burst. Everything else
+        # (EUR, GBP, JPY, CAD, ...): FMP layer at a relaxed cadence.
+        h = match_handler(ev.get("title", "")) if cur == "USD" else None
+        watch.append({"ev": ev, "dt": dt, "h": h, "done": False})
 
     if not watch:
-        print("No US High-impact events with handlers in this window. Exiting.")
+        print("No High-impact events in this window. Exiting.")
         return
-    print("Watching:", ", ".join(w["ev"]["title"] for w in watch))
+    print("Watching:", ", ".join(f"{w['ev'].get('country','?')} {w['ev']['title']}" for w in watch))
     for w in watch:
+        if w["h"] is None:
+            continue
         try:
             w["h"].snapshot()
         except Exception as e:
             print(f"[warn] snapshot failed for {w['ev']['title']}: {e}")
 
     actuals = load_json(ACTUALS_FILE, {})
+    import fmp as F
+    from datetime import timezone as _tzu
+    next_fmp = 0.0
 
     while time.time() < deadline and any(not w["done"] for w in watch):
         now = datetime.now(ET)
+
+        # ---- FMP layer: global events without an official-API handler ----
+        if time.time() >= next_fmp:
+            pend = [w for w in watch
+                    if not w["done"] and w["h"] is None and now >= w["dt"] - timedelta(minutes=2)]
+            if pend and F.API_KEY:
+                rows = F.fetch(today.isoformat(), today.isoformat())
+                for w in pend:
+                    ev = w["ev"]
+                    cur = ev.get("country", "").upper()
+                    title = str(ev.get("title", ""))
+                    try:
+                        when = w["dt"].astimezone(_tzu.utc)
+                    except Exception:
+                        when = None
+                    a, _est = F.find_actual(rows, title, cur, when_utc=when)
+                    if a is None:
+                        continue
+                    fc_raw = ev.get("forecast")
+                    actual_s = F.fmt_like(a, fc_raw)
+                    fc, av = parse_forecast(fc_raw), parse_forecast(actual_s)
+                    if fc is not None and av is not None:
+                        verdict = "ABOVE FORECAST" if av > fc else ("BELOW FORECAST" if av < fc else "IN LINE")
+                        msg = f"🔴 **{cur} {title}: {actual_s}** vs forecast {fc_raw} — **{verdict}**"
+                    else:
+                        msg = f"🔴 **{cur} {title}: {actual_s}**"
+                    try:
+                        post_discord(msg)
+                        print("POSTED(FMP):", msg)
+                        w["done"] = True
+                        actuals[f"{today.isoformat()}|{cur}|{title}"] = actual_s
+                    except Exception as e:
+                        print(f"[warn] discord post failed: {e}")
+            next_fmp = time.time() + 60  # free-tier budget: ~1 call/min max
+
         for w in watch:
-            if w["done"] or now < w["dt"] - timedelta(seconds=30):
+            if w["done"] or w["h"] is None or now < w["dt"] - timedelta(seconds=30):
                 continue
             try:
                 res = w["h"].value()

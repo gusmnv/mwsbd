@@ -153,6 +153,30 @@ def backfill_actuals(day, items, actuals):
                     print(f"backfilled {title}: {actuals[key]}")
         except Exception as e:
             print(f"[warn] backfill {title}: {e}")
+
+    # ---- FMP fallback: global actuals (any currency) for whatever is still
+    # missing — ISM, Claims, CHF CPI, EUR/GBP/JPY events, tudo. ----
+    try:
+        import fmp
+        from datetime import timedelta as _tdf, timezone as _tzf
+        missing = [(dt, ev) for dt, ev in items if not actuals.get(
+            f"{day.isoformat()}|{ev.get('country', '').upper()}|{ev.get('title', '')}")]
+        if missing and fmp.API_KEY:
+            rows = fmp.fetch((day - _tdf(days=1)).isoformat(), (day + _tdf(days=1)).isoformat())
+            for dt, ev in missing:
+                cur = ev.get("country", "").upper()
+                title = str(ev.get("title", ""))
+                key = f"{day.isoformat()}|{cur}|{title}"
+                try:
+                    when = dt.astimezone(_tzf.utc)
+                except Exception:
+                    when = None
+                a, _est = fmp.find_actual(rows, title, cur, when_utc=when)
+                if a is not None:
+                    actuals[key] = fmp.fmt_like(a, ev.get("forecast"))
+                    print(f"backfilled via FMP {title}: {actuals[key]}")
+    except Exception as e:
+        print(f"[warn] FMP backfill: {e}")
     return actuals
 
 
@@ -277,6 +301,13 @@ def main():
             if not days:
                 print("No events this week.")
                 return
+            for day in days:  # fill any hole in the week before posting
+                actuals = backfill_actuals(day, by_day[day], actuals)
+            try:
+                ACTUALS_FILE.parent.mkdir(parents=True, exist_ok=True)
+                ACTUALS_FILE.write_text(json.dumps(actuals, indent=0))
+            except Exception:
+                pass
             post_text("**WEEKLY RECAP**")
             time.sleep(1)
             for day in days:
