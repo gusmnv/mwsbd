@@ -24,6 +24,7 @@ jobs:
           DISCORD_WEBHOOK_ECONOMIC_DATA: ${{ secrets.DISCORD_WEBHOOK_ECONOMIC_DATA }}
           BLS_API_KEY: ${{ secrets.BLS_API_KEY }}
           BEA_API_KEY: ${{ secrets.BEA_API_KEY }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
         run: python scripts/economic_data.py recap
       # tomorrow's calendar step removed: economic-today posts the day's calendar
       # at 00:00 UTC sharp, so posting it here at 22:10 would duplicate it.

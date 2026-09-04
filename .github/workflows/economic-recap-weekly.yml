@@ -20,4 +20,7 @@ jobs:
       - name: Post weekly economic recap
         env:
           DISCORD_WEBHOOK_ECONOMIC_DATA: ${{ secrets.DISCORD_WEBHOOK_ECONOMIC_DATA }}
+          BLS_API_KEY: ${{ secrets.BLS_API_KEY }}
+          BEA_API_KEY: ${{ secrets.BEA_API_KEY }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
         run: python scripts/economic_data.py weekrecap
