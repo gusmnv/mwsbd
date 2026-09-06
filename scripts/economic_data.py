@@ -69,9 +69,11 @@ def parse(events):
 
 # Fixed column widths (same for every day so all tables share the same right edge)
 # headers centered; text values left-aligned; numeric values right-aligned
-COLS = [("TIME", 10, "r"), ("CURRENCY", 8, "c"), ("IMPACT", 6, "c"),
-        ("EVENT", 34, "c"), ("FORECAST", 8, "r"), ("PREVIOUS", 8, "r")]
-GAP = "    "
+# Compact layout: total width <= 76 chars so Discord never wraps the rows,
+# even in a narrow window (wrapping was pushing PREVIOUS onto its own line).
+COLS = [("TIME ET", 7, "r"), ("CUR", 4, "c"), ("IMPACT", 6, "c"),
+        ("EVENT", 33, "c"), ("FORECAST", 8, "r"), ("PREVIOUS", 8, "r")]
+GAP = "  "
 TABLE_WIDTH = sum(w for _, w, _ in COLS) + len(GAP) * (len(COLS) - 1)
 
 
@@ -87,7 +89,7 @@ def _cell(s, w, a):
 
 
 def _cells(dt, ev):
-    t = (dt.strftime("%-I:%M%p").lower() + " ET") if (dt.hour or dt.minute) else "All day"
+    t = dt.strftime("%-I:%M%p").lower() if (dt.hour or dt.minute) else "all day"
     return [t,
             ev.get("country", "").upper(),
             ev.get("impact", "").title(),
@@ -111,7 +113,7 @@ def day_table_message(day, items) -> str:
 # ---- daily / weekly recap (uses actuals captured by economic_live.py) ---------
 ACTUALS_FILE = __import__("pathlib").Path(__file__).resolve().parent.parent / "state" / "econ_actuals.json"
 
-RCOLS = [("TIME", 10, "r"), ("CURRENCY", 8, "c"), ("EVENT", 34, "c"),
+RCOLS = [("TIME ET", 7, "r"), ("CUR", 4, "c"), ("EVENT", 33, "c"),
          ("FORECAST", 8, "r"), ("ACTUAL", 8, "r")]
 RWIDTH = sum(w for _, w, _ in RCOLS) + len(GAP) * (len(RCOLS) - 1)
 
@@ -191,7 +193,7 @@ def recap_table_message(day, items, actuals) -> str:
     sep = "─" * RWIDTH
     lines = []
     for dt, ev in items:
-        t = (dt.strftime("%-I:%M%p").lower() + " ET") if (dt.hour or dt.minute) else "All day"
+        t = dt.strftime("%-I:%M%p").lower() if (dt.hour or dt.minute) else "all day"
         key = f"{day.isoformat()}|{ev.get('country','').upper()}|{ev.get('title','')}"
         cells = [t, ev.get("country", "").upper(), str(ev.get("title", "")),
                  str(ev.get("forecast") or "—"), str(actuals.get(key, "—"))]
