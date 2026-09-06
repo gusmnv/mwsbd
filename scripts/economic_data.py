@@ -2,9 +2,11 @@
 mwsbd — #economic-data bot
 Sunday: posts the week's economic calendar as clean centered text tables
 (code blocks — they scroll horizontally on mobile, never wrap).
-Source: free ForexFactory weekly feed (times are US Eastern / New York).
+Source: free ForexFactory weekly feed (feed times are US Eastern; we convert
+everything to UTC — HORARIO E CHAVE: all displayed times and day groupings
+are UTC, matching the 00:00-UTC calendar / 23:59-UTC recap regime).
 
-Columns: TIME (ET) · CUR · IMPACT · EVENT · FORECAST · PREVIOUS
+Columns: UTC · CUR · IMPACT · EVENT · FORECAST · PREVIOUS
 Filter: High + Medium impact, ALL currencies.
 
 Required env var:
@@ -58,7 +60,14 @@ def parse(events):
         if ev.get("impact", "").title() not in IMPACTS:
             continue
         try:
-            dt = datetime.fromisoformat(ev["date"])  # feed times are US Eastern
+            # feed times are US Eastern; HORARIO E CHAVE: convert to UTC and
+            # group by the UTC day, so tables match the 00:00-UTC day regime.
+            from datetime import timezone as _tzp
+            raw = datetime.fromisoformat(ev["date"])
+            # all-day events come through as local midnight; flag them BEFORE
+            # the UTC conversion turns 00:00 ET into 04:00/05:00 UTC.
+            ev["_allday"] = (raw.hour == 0 and raw.minute == 0)
+            dt = raw.astimezone(_tzp.utc)
         except (KeyError, ValueError):
             continue
         by_day[dt.date()].append((dt, ev))
@@ -71,7 +80,7 @@ def parse(events):
 # headers centered; text values left-aligned; numeric values right-aligned
 # Compact layout: total width <= 76 chars so Discord never wraps the rows,
 # even in a narrow window (wrapping was pushing PREVIOUS onto its own line).
-COLS = [("TIME ET", 7, "r"), ("CUR", 4, "c"), ("IMPACT", 6, "c"),
+COLS = [("UTC", 5, "r"), ("CUR", 4, "c"), ("IMPACT", 6, "c"),
         ("EVENT", 33, "c"), ("FORECAST", 8, "r"), ("PREVIOUS", 8, "r")]
 GAP = "  "
 TABLE_WIDTH = sum(w for _, w, _ in COLS) + len(GAP) * (len(COLS) - 1)
@@ -89,7 +98,7 @@ def _cell(s, w, a):
 
 
 def _cells(dt, ev):
-    t = dt.strftime("%-I:%M%p").lower() if (dt.hour or dt.minute) else "all day"
+    t = "all-d" if ev.get("_allday") else dt.strftime("%H:%M")
     return [t,
             ev.get("country", "").upper(),
             ev.get("impact", "").title(),
@@ -113,7 +122,7 @@ def day_table_message(day, items) -> str:
 # ---- daily / weekly recap (uses actuals captured by economic_live.py) ---------
 ACTUALS_FILE = __import__("pathlib").Path(__file__).resolve().parent.parent / "state" / "econ_actuals.json"
 
-RCOLS = [("TIME ET", 7, "r"), ("CUR", 4, "c"), ("EVENT", 33, "c"),
+RCOLS = [("UTC", 5, "r"), ("CUR", 4, "c"), ("EVENT", 33, "c"),
          ("FORECAST", 8, "r"), ("ACTUAL", 8, "r")]
 RWIDTH = sum(w for _, w, _ in RCOLS) + len(GAP) * (len(RCOLS) - 1)
 
@@ -193,7 +202,7 @@ def recap_table_message(day, items, actuals) -> str:
     sep = "─" * RWIDTH
     lines = []
     for dt, ev in items:
-        t = dt.strftime("%-I:%M%p").lower() if (dt.hour or dt.minute) else "all day"
+        t = "all-d" if ev.get("_allday") else dt.strftime("%H:%M")
         key = f"{day.isoformat()}|{ev.get('country','').upper()}|{ev.get('title','')}"
         cells = [t, ev.get("country", "").upper(), str(ev.get("title", "")),
                  str(ev.get("forecast") or "—"), str(actuals.get(key, "—"))]
@@ -282,12 +291,12 @@ def main():
         return
 
     if mode in ("recap", "weekrecap"):
-        from zoneinfo import ZoneInfo
-        from datetime import timedelta as _td
+        from datetime import timedelta as _td, timezone as _tz
         actuals = load_actuals()
-        # anchored: intended post ~21:05 ET. A late start past midnight ET
-        # must still recap the day we were meant to recap, not tomorrow.
-        today_et = (datetime.now(ZoneInfo("America/New_York")) - _td(hours=8)).date()
+        # HORARIO E CHAVE: recap closes the UTC day at 23:59 UTC. The -30min
+        # bias means a run that slips past midnight UTC still recaps the day
+        # it was dispatched to close, never the new (empty) day.
+        today_et = (datetime.now(_tz.utc) - _td(minutes=30)).date()
         if mode == "recap":
             if today_et not in by_day:
                 print("No events today.")

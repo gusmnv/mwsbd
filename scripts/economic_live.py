@@ -341,7 +341,7 @@ def main():
                         post_discord(msg)
                         print("POSTED(FMP):", msg)
                         w["done"] = True
-                        actuals[f"{today.isoformat()}|{cur}|{title}"] = actual_s
+                        actuals[f"{w['dt'].astimezone(_tzu.utc).date().isoformat()}|{cur}|{title}"] = actual_s
                     except Exception as e:
                         print(f"[warn] discord post failed: {e}")
             next_fmp = time.time() + 60  # free-tier budget: ~1 call/min max
@@ -383,8 +383,9 @@ def main():
                     msg = (f"🔴 **US {title}: {actual_s}** vs forecast {fc_raw} — **{verdict}**")
                 else:
                     msg = f"🔴 **US {title}: {actual_s}**"
-                key = f"{today.isoformat()}|USD|{title}"
-                actuals[key] = actual_s
+                # HORARIO E CHAVE: key by the event's UTC date so the 23:59
+                # recap (which now groups/looks up by UTC day) finds it.
+                actuals[f"{w['dt'].astimezone(_tzu.utc).date().isoformat()}|USD|{title}"] = actual_s
             try:
                 post_discord(msg)
                 print("POSTED:", msg)
