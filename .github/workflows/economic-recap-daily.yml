@@ -14,9 +14,10 @@ jobs:
           python-version: "3.12"
       - name: Wait until exact post time
         run: |
-          # 22:10 UTC sharp, right after the earnings daily recap (22:00) and
-          # always before the next day's calendar (00:00 UTC).
-          target=$(date -u -d "today 22:10 UTC" +%s)
+          # 23:59 UTC sharp - the LAST minute of the UTC day (economic events run
+          # all day, so the recap must close the day; the new day's calendar
+          # follows at 00:00, never in the same minute).
+          target=$(date -u -d "today 23:59 UTC" +%s)
           now=$(date -u +%s)
           [ "$now" -lt "$target" ] && sleep $((target-now)) || true
       - name: Post daily economic recap
@@ -27,4 +28,4 @@ jobs:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
         run: python scripts/economic_data.py recap
       # tomorrow's calendar step removed: economic-today posts the day's calendar
-      # at 00:00 UTC sharp, so posting it here at 22:10 would duplicate it.
+      # at 00:00 UTC sharp, so posting it here too would duplicate it.

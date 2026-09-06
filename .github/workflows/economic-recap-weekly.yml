@@ -14,7 +14,9 @@ jobs:
           python-version: "3.12"
       - name: Wait until exact post time
         run: |
-          target=$(date -u -d "today 01:35 UTC" +%s)
+          # 23:59 UTC Saturday - the LAST minute of the UTC week; the new weekly
+          # calendar follows at 00:00 Sunday, never in the same minute.
+          target=$(date -u -d "today 23:59 UTC" +%s)
           now=$(date -u +%s)
           [ "$now" -lt "$target" ] && sleep $((target-now)) || true
       - name: Post weekly economic recap
