@@ -51,4 +51,8 @@ jobs:
           git pull --rebase || true
           git add state/ || true
           git diff --cached --quiet || git commit -m "chore: update live earnings state"
-          git push || true
+          for i in 1 2 3 4 5; do
+            git push && break
+            echo "push failed (attempt $i) - rebasing and retrying"
+            sleep $((i*5)); git pull --rebase || true
+          done

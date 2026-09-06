@@ -14,10 +14,10 @@ jobs:
           python-version: "3.12"
       - name: Wait until exact post time
         run: |
-          target=$(date -u -d "today 01:30 UTC" +%s)
+          target=$(date -u -d "today 00:00 UTC" +%s)
           now=$(date -u +%s)
           if [ "$now" -lt "$target" ]; then
-            echo "Sleeping $((target-now))s until 01:30 UTC sharp"
+            echo "Sleeping $((target-now))s until 00:00 UTC sharp"
             sleep $((target-now))
           else
             echo "LATE START: $(( (now-target)/60 )) min after target — posting anyway"
