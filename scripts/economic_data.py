@@ -32,7 +32,9 @@ def ordinal(n: int) -> str:
     return f"{n}" + {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
 
 
-def fetch_events(retries=3, url=FEED_URL):
+def fetch_events(retries=3, url=FEED_URL, soft=False):
+    """soft=True: return None on failure instead of raising (the nextweek feed
+    404s during ForexFactory's weekend rollover - that must never crash us)."""
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (MrWallStreetBot)"})
     last = None
     for attempt in range(retries):
@@ -43,6 +45,9 @@ def fetch_events(retries=3, url=FEED_URL):
             last = e
             if attempt < retries - 1:
                 time.sleep(10 * (attempt + 1))
+    if soft:
+        print(f"[warn] feed fetch failed ({url.rsplit('/',1)[-1]}): {last}")
+        return None
     raise last
 
 
@@ -245,7 +250,8 @@ def main():
         today_utc = (datetime.now(_tz.utc) + _td(minutes=30)).date()
         if today_utc not in by_day:
             # UTC day may live in next week's ET feed (Sunday 00:00 UTC case)
-            by_day = parse(fetch_events(url=NEXTWEEK_URL))
+            nb_events = fetch_events(retries=1, url=NEXTWEEK_URL, soft=True)
+            by_day = parse(nb_events) if nb_events else {}
             if today_utc not in by_day:
                 print("No events today.")
                 return
@@ -317,13 +323,30 @@ def main():
         return
 
     # Weekly calendar posts at 00:00 UTC Sunday (= Saturday evening ET), when
-    # the "thisweek" feed still holds the ENDING week - roll to nextweek feed.
+    # the "thisweek" feed still holds the ENDING week - roll to the nextweek
+    # feed. During ForexFactory's weekend rollover the nextweek file can 404
+    # for a while, so retry patiently (up to ~30 min) instead of crashing.
     from datetime import timedelta as _tdw, timezone as _tzw
     _today_utc = (datetime.now(_tzw.utc) + _tdw(minutes=30)).date()
     if not by_day or max(by_day) <= _today_utc:
-        nb = parse(fetch_events(url=NEXTWEEK_URL))
-        if nb:
-            by_day = nb
+        fresh = None
+        for attempt in range(30):
+            nb_events = fetch_events(retries=1, url=NEXTWEEK_URL, soft=True)
+            nb = parse(nb_events) if nb_events else {}
+            if nb and max(nb) > _today_utc:
+                fresh = nb
+                break
+            tw_events = fetch_events(retries=1, soft=True)   # thisweek may have rolled
+            tw = parse(tw_events) if tw_events else {}
+            if tw and max(tw) > _today_utc:
+                fresh = tw
+                break
+            print(f"[warn] feeds still show the old week (attempt {attempt+1}/30) - retrying in 60s")
+            time.sleep(60)
+        if fresh:
+            by_day = fresh
+        else:
+            print("[warn] feeds never rolled over - posting what we have.")
 
     days = sorted(by_day)
     post_text("**WEEKLY CALENDAR**")

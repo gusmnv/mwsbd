@@ -346,9 +346,23 @@ def main():
                         print(f"[warn] discord post failed: {e}")
             next_fmp = time.time() + 60  # free-tier budget: ~1 call/min max
 
+        polled_hot = False
         for w in watch:
             if w["done"] or w["h"] is None or now < w["dt"] - timedelta(seconds=30):
                 continue
+            # BLS rate-limit guard (Friday NFP: 1s hammering from T-45s made
+            # BLS 503 the key for the rest of the day). Rules now:
+            #   * capture window = release-5s .. release+90s -> 1s cadence,
+            #     but at most ONE hot API call per loop cycle (round-robin);
+            #   * outside the window -> one call per event every 20s.
+            hot_w = (w["dt"] - timedelta(seconds=5)) <= now <= (w["dt"] + timedelta(seconds=90))
+            if hot_w and polled_hot:
+                continue
+            if time.time() < w.get("next_poll", 0.0):
+                continue
+            w["next_poll"] = time.time() + (1 if hot_w else 20)
+            if hot_w:
+                polled_hot = True
             try:
                 res = w["h"].value()
             except Exception as e:
@@ -377,10 +391,11 @@ def main():
                 w["done"] = True
             except Exception as e:
                 print(f"[warn] discord post failed: {e}")
-        # Burst mode: poll every second from 45s before a release until it is
-        # captured (or 10 min pass); otherwise relax to protect API quotas.
+        # Burst mode: 1s loop cadence only while some event is inside its
+        # capture window (release-5s .. release+90s); relaxed otherwise.
+        # Per-event next_poll above keeps the API call count quota-safe.
         hot = any(
-            (not w["done"]) and (w["dt"] - timedelta(seconds=45) <= now <= w["dt"] + timedelta(minutes=10))
+            (not w["done"]) and (w["dt"] - timedelta(seconds=5) <= now <= w["dt"] + timedelta(seconds=90))
             for w in watch
         )
         time.sleep(POLL_FAST if hot else POLL_SECONDS)

@@ -446,6 +446,30 @@ def split_table_message(msg: str) -> list[str]:
 
 
 # ---- modes ----------------------------------------------------------------------
+def wait_until_post_at():
+    """HORARIO E CHAVE: if POST_AT ('HH:MM' UTC) is set, sleep until that time
+    TODAY so messages built in advance land at the exact second. If the time
+    already passed (late dispatch, manual test), post immediately."""
+    t = os.environ.get("POST_AT", "").strip()
+    if not t:
+        return
+    try:
+        hh, mm = map(int, t.split(":"))
+    except ValueError:
+        return
+    from datetime import datetime as _dtt, timezone as _tzz
+    now = _dtt.now(_tzz.utc)
+    target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)   # next occurrence (e.g. 23:56 -> 00:00)
+    delta = (target - now).total_seconds()
+    if delta <= 10800:
+        print(f"Built. Sleeping {int(delta)}s until {t} UTC sharp.")
+        time.sleep(delta)
+    else:
+        print(f"POST_AT {t} UTC is {int(delta)}s away — late dispatch, posting now.")
+
+
 def preview():
     today = date.today()
     monday = today + timedelta(days=(7 - today.weekday()) % 7 or 7)
@@ -455,6 +479,7 @@ def preview():
     if not msgs:
         print("Nothing above the cutoff next week.")
         return
+    wait_until_post_at()   # tables are ready BEFORE midnight; post at 00:00:00
     post_to_discord("**WEEKLY CALENDAR**")
     time.sleep(1)
     send_messages(msgs)
