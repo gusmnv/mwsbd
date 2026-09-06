@@ -1,5 +1,5 @@
 """
-Mr Wall Street — LIVE US economic data watcher (#economic-data)
+mwsbd — LIVE US economic data watcher (#economic-data)
 
 Runs as a continuous session around the big US release windows. The moment an
 official source publishes a number, posts:  actual vs forecast — ABOVE/BELOW.
@@ -42,7 +42,7 @@ ET = ZoneInfo("America/New_York")
 
 # ---------------------------------------------------------------- HTTP helpers
 def http_get(url, timeout=20, retries=3):
-    req = urllib.request.Request(url, headers={"User-Agent": "MrWallStreetBot (contact: alternartivebull@gmail.com)"})
+    req = urllib.request.Request(url, headers={"User-Agent": "mwsbd/1.0 (contact: alternartivebull@gmail.com)"})
     last = None
     for attempt in range(retries):
         try:
@@ -59,7 +59,7 @@ def post_discord(content: str):
     payload = {"content": content[:2000], "allowed_mentions": {"parse": []}}
     req = urllib.request.Request(
         WEBHOOK, data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json", "User-Agent": "MrWallStreetBot"},
+        headers={"Content-Type": "application/json", "User-Agent": "mwsbd/1.0"},
         method="POST")
     with urllib.request.urlopen(req, timeout=20) as r:
         return r.status
@@ -85,7 +85,7 @@ def bls_series(series_ids: list[str]) -> dict:
                        "endyear": str(datetime.now().year)}).encode()
     req = urllib.request.Request("https://api.bls.gov/publicAPI/v2/timeseries/data/",
                                  data=body, headers={"Content-Type": "application/json",
-                                                     "User-Agent": "MrWallStreetBot"})
+                                                     "User-Agent": "mwsbd/1.0"})
     with urllib.request.urlopen(req, timeout=25) as r:
         data = json.loads(r.read().decode())
     out = {}

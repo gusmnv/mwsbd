@@ -1,5 +1,5 @@
 """
-Mr Wall Street — #economic-data bot
+mwsbd — #economic-data bot
 Sunday: posts the week's economic calendar as clean centered text tables
 (code blocks — they scroll horizontally on mobile, never wrap).
 Source: free ForexFactory weekly feed (times are US Eastern / New York).
@@ -35,7 +35,7 @@ def ordinal(n: int) -> str:
 def fetch_events(retries=3, url=FEED_URL, soft=False):
     """soft=True: return None on failure instead of raising (the nextweek feed
     404s during ForexFactory's weekend rollover - that must never crash us)."""
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (MrWallStreetBot)"})
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (mwsbd)"})
     last = None
     for attempt in range(retries):
         try:
@@ -153,7 +153,7 @@ def backfill_actuals(day, items, actuals):
             elif cur == "CAD" and "Overnight Rate" in title:
                 raw = urllib.request.urlopen(urllib.request.Request(
                     "https://www.bankofcanada.ca/valet/observations/V39079/json?recent=1",
-                    headers={"User-Agent": "MrWallStreetBot"}), timeout=20).read()
+                    headers={"User-Agent": "mwsbd/1.0"}), timeout=20).read()
                 obs = json.loads(raw)["observations"]
                 if obs:
                     actuals[key] = f"{float(obs[-1]['V39079']['v']):.2f}%"
@@ -228,7 +228,7 @@ def post_text(content: str):
     payload = {"content": content[:2000], "allowed_mentions": {"parse": []}}
     req = urllib.request.Request(
         WEBHOOK, data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json", "User-Agent": "MrWallStreetBot"},
+        headers={"Content-Type": "application/json", "User-Agent": "mwsbd/1.0"},
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=20) as r:

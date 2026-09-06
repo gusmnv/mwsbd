@@ -1,5 +1,5 @@
 """
-Mr Wall Street — #stock-earnings bot (Finnhub)
+mwsbd — #stock-earnings bot (Finnhub)
 
 Modes:
   python earnings.py preview  → Sunday: week-ahead table, grouped by day
@@ -37,7 +37,7 @@ REPORTED_FILE = STATE_DIR / "reported_earnings.json"
 MCAP_CACHE_FILE = STATE_DIR / "mcap_cache.json"
 
 # ---- region by ticker suffix -------------------------------------------------
-EU = "🇪🇺"  # all European Union listings show the EU flag, per Mr Wall Street
+EU = "🇪🇺"  # all European Union listings show the EU flag
 SUFFIX_FLAG = {
     "SS": "🇨🇳", "SZ": "🇨🇳", "HK": "🇭🇰", "T": "🇯🇵", "KS": "🇰🇷", "KQ": "🇰🇷",
     "L": "🇬🇧", "SW": "🇨🇭", "OL": "🇳🇴",  # non-EU Europe keeps its own flag
@@ -64,7 +64,7 @@ def api(path: str, params: dict, retries: int = 3) -> object:
     """Finnhub call with automatic retry on transient 5xx/network errors."""
     qs = "&".join(f"{k}={v}" for k, v in {**params, "token": API_KEY}.items())
     url = f"https://finnhub.io/api/v1/{path}?{qs}"
-    req = urllib.request.Request(url, headers={"User-Agent": "MrWallStreetBot"})
+    req = urllib.request.Request(url, headers={"User-Agent": "mwsbd/1.0"})
     last = None
     for attempt in range(retries):
         try:
@@ -89,7 +89,7 @@ def post_to_discord(content: str):
     req = urllib.request.Request(
         WEBHOOK,
         data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json", "User-Agent": "MrWallStreetBot"},
+        headers={"Content-Type": "application/json", "User-Agent": "mwsbd/1.0"},
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=20) as r:
@@ -348,7 +348,7 @@ def post_image(png: bytes, filename: str, content: str = ""):
     req = urllib.request.Request(
         WEBHOOK, data=body,
         headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
-                 "User-Agent": "MrWallStreetBot"},
+                 "User-Agent": "mwsbd/1.0"},
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=30) as r:

@@ -1,5 +1,5 @@
 """
-Mr Wall Street — LIVE earnings watcher (#stock-earnings)
+mwsbd — LIVE earnings watcher (#stock-earnings)
 
 Runs as a continuous session during the hot windows (pre-market / after-hours):
   Layer 1 — SEC EDGAR: polls the real-time 8-K feed every cycle. The second an
@@ -37,11 +37,11 @@ ALERTED_FILE = STATE_DIR / "edgar_alerted.json"
 EDGAR_FEED = ("https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent"
               "&type=8-K&company=&dateb=&owner=include&count=100&output=atom")
 CIK_MAP_URL = "https://www.sec.gov/files/company_tickers.json"
-SEC_UA = {"User-Agent": "MrWallStreetBot contact alternartivebull@gmail.com"}
+SEC_UA = {"User-Agent": "mwsbd/1.0 (contact: alternartivebull@gmail.com)"}
 
 
 def fetch(url, headers=None, timeout=20):
-    req = urllib.request.Request(url, headers=headers or {"User-Agent": "MrWallStreetBot"})
+    req = urllib.request.Request(url, headers=headers or {"User-Agent": "mwsbd/1.0"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read()
 

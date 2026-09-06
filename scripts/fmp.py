@@ -1,5 +1,5 @@
 """
-Mr Wall Street — FMP economic calendar helper.
+mwsbd — FMP economic calendar helper.
 
 Global actuals (live + recap backfill) from the Financial Modeling Prep
 economic calendar: any country, actual / estimate / previous per event.
@@ -62,7 +62,7 @@ def fetch(day_from, day_to, timeout=20):
     for base in BASES:
         url = f"{base}?from={day_from}&to={day_to}&apikey={API_KEY}"
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "MrWallStreetBot"})
+            req = urllib.request.Request(url, headers={"User-Agent": "mwsbd/1.0"})
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 data = json.loads(r.read().decode())
             if isinstance(data, list):
