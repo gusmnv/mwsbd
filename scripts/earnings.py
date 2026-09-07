@@ -529,8 +529,15 @@ def wait_until_post_at():
 
 
 def preview():
-    today = date.today()
-    monday = today + timedelta(days=(7 - today.weekday()) % 7 or 7)
+    # The week CONTAINING TOMORROW: on the scheduled Sunday-00:00 run this is
+    # the week starting Monday (unchanged); on a manual mid-week dispatch it
+    # shows the current week instead of silently jumping to the next one.
+    # +30min bias (same as the economic bots): the scheduled run starts a few
+    # minutes BEFORE Sunday midnight to build tables, and must anchor on the
+    # new day it will post into, not the dying Saturday.
+    from datetime import datetime as _dt, timezone as _tz
+    anchor = (_dt.now(_tz.utc) + timedelta(minutes=30)).date() + timedelta(days=1)
+    monday = anchor - timedelta(days=anchor.weekday())
     friday = monday + timedelta(days=4)
     entries = get_calendar(monday, friday)
     msgs = build_day_messages(entries)
