@@ -42,6 +42,7 @@ jobs:
         env:
           DISCORD_WEBHOOK_STOCK_EARNINGS: ${{ secrets.DISCORD_WEBHOOK_STOCK_EARNINGS }}
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           MIN_MCAP_B: "5"
         run: python scripts/earnings.py today
       - name: Save market-cap cache

@@ -16,5 +16,6 @@ jobs:
         env:
           DISCORD_WEBHOOK_STOCK_EARNINGS: ${{ secrets.DISCORD_WEBHOOK_STOCK_EARNINGS }}
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           POST_AT: "00:00"   # tables built first, then posted at 00:00:00 UTC sharp
         run: python scripts/earnings.py preview
