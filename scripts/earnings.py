@@ -379,9 +379,65 @@ def _hist_hour(sym: str) -> str:
                 break
     except Exception as e:
         print(f"[warn] hist hour {sym}: {e}")
+    if not hour:
+        # Finnhub free tier only keeps ~1 month of history; EDGAR filing
+        # times cover everyone. (Defined below; resolved at call time.)
+        hour = _edgar_hour(sym)
     cache[sym] = [hour, today_key]
     save_json(HOUR_CACHE_FILE, cache)
     return hour
+
+
+SEC_UA = {"User-Agent": "mwsbd/1.0 (contact: alternartivebull@gmail.com)"}
+_CIK_MAP = None
+
+
+def _cik_for(sym: str):
+    global _CIK_MAP
+    if _CIK_MAP is None:
+        try:
+            raw = urllib.request.urlopen(urllib.request.Request(
+                "https://www.sec.gov/files/company_tickers.json", headers=SEC_UA),
+                timeout=20).read()
+            _CIK_MAP = {r["ticker"].upper(): int(r["cik_str"])
+                        for r in json.loads(raw).values()}
+        except Exception as e:
+            print(f"[warn] CIK map failed: {e}")
+            _CIK_MAP = {}
+    return _CIK_MAP.get(str(sym).upper())
+
+
+def _edgar_hour(sym: str) -> str:
+    """Session inferred from EDGAR: acceptance times of the company's recent
+    earnings 8-Ks (item 2.02). Majority vote over the last 4 so one odd mixed
+    8-K (e.g. a dawn financing announcement that also carries 2.02) cannot
+    flip the answer. Free, unlimited, authoritative."""
+    cik = _cik_for(sym)
+    if not cik:
+        return ""
+    try:
+        from datetime import datetime as _dt
+        from zoneinfo import ZoneInfo
+        raw = urllib.request.urlopen(urllib.request.Request(
+            f"https://data.sec.gov/submissions/CIK{cik:010d}.json", headers=SEC_UA),
+            timeout=20).read()
+        rec = json.loads(raw)["filings"]["recent"]
+        votes = []
+        for form, items, acc in zip(rec.get("form", []), rec.get("items", []),
+                                    rec.get("acceptanceDateTime", [])):
+            if not str(form).startswith("8-K") or "2.02" not in str(items or ""):
+                continue
+            et = _dt.fromisoformat(str(acc).replace("Z", "+00:00")).astimezone(
+                ZoneInfo("America/New_York"))
+            m = et.hour * 60 + et.minute
+            votes.append("bmo" if m < 9 * 60 + 30 else ("amc" if m >= 16 * 60 else "dmh"))
+            if len(votes) >= 4:
+                break
+        if votes:
+            return max(set(votes), key=votes.count)
+    except Exception as e:
+        print(f"[warn] EDGAR hour {sym}: {e}")
+    return ""
 
 
 def session_word(e: dict) -> str:
