@@ -35,6 +35,7 @@ MIN_MCAP_B = float(os.environ.get("MIN_MCAP_B", "5"))
 STATE_DIR = Path(__file__).resolve().parent.parent / "state"
 REPORTED_FILE = STATE_DIR / "reported_earnings.json"
 MCAP_CACHE_FILE = STATE_DIR / "mcap_cache.json"
+HOUR_CACHE_FILE = STATE_DIR / "hour_cache.json"
 
 # ---- region by ticker suffix -------------------------------------------------
 EU = "🇪🇺"  # all European Union listings show the EU flag
@@ -350,6 +351,44 @@ def num_short(x, money=True) -> str:
 
 TIME_WORD = {"bmo": "Before open", "amc": "After close", "dmh": "In market"}
 
+
+def _hist_hour(sym: str) -> str:
+    """Last known reporting session (bmo/amc/dmh) for a symbol, '' if unknown.
+    Companies almost never switch sessions (KR is always before open, GME
+    always after close), so when the upcoming entry's time is unconfirmed we
+    show the previous quarter's session instead of TBD - same trick the big
+    earnings sites use. Cached 90 days in state/."""
+    if not sym:
+        return ""
+    cache = load_json(HOUR_CACHE_FILE, {})
+    today_key = date.today().strftime("%Y%m%d")
+    hit = cache.get(sym)
+    if hit and (int(today_key) - int(hit[1])) <= 90:
+        return hit[0] or ""
+    hour = ""
+    try:
+        t = date.today()
+        data = api("calendar/earnings", {"from": (t - timedelta(days=400)).isoformat(),
+                                         "to": (t - timedelta(days=7)).isoformat(),
+                                         "symbol": sym})
+        rows = sorted(data.get("earningsCalendar", []) or [],
+                      key=lambda e: e.get("date", ""))
+        for e in reversed(rows):
+            if e.get("hour"):
+                hour = e["hour"]
+                break
+    except Exception as e:
+        print(f"[warn] hist hour {sym}: {e}")
+    cache[sym] = [hour, today_key]
+    save_json(HOUR_CACHE_FILE, cache)
+    return hour
+
+
+def session_word(e: dict) -> str:
+    """Human timing for a calendar entry, falling back to the company's last
+    known session when the upcoming one is unconfirmed."""
+    return TIME_WORD.get(e.get("hour") or _hist_hour(e.get("symbol", "")), "TBD")
+
 # ---- table rendered as image (clean, quarterchart-style) ----------------------
 DEJAVU = "/usr/share/fonts/truetype/dejavu"
 PLEX = Path(__file__).resolve().parent.parent / "fonts" / "IBMPlexSans.ttf"
@@ -390,7 +429,8 @@ def render_day_image(day_iso: str, entries: list[dict], mcaps: dict) -> bytes:
     # order: Before open first, then in-market, then After close, unknown last;
     # inside each group, biggest market cap first
     session_order = {"bmo": 0, "dmh": 1, "amc": 2}
-    rows = sorted(entries, key=lambda e: (session_order.get(e.get("hour", ""), 3),
+    _eff = lambda e: e.get("hour") or _hist_hour(e.get("symbol", ""))
+    rows = sorted(entries, key=lambda e: (session_order.get(_eff(e), 3),
                                           -(mcaps.get(e.get("symbol")) or 0)))
     W = 1180
     title_h, header_h, row_h, bottom_pad = 92, 58, 62, 24
@@ -499,7 +539,8 @@ def _cell(s, w, a):
 
 def day_table_message(day_iso: str, entries: list[dict], mcaps: dict) -> str:
     session_order = {"bmo": 0, "dmh": 1, "amc": 2}
-    rows = sorted(entries, key=lambda e: (session_order.get(e.get("hour", ""), 3),
+    _eff = lambda e: e.get("hour") or _hist_hour(e.get("symbol", ""))
+    rows = sorted(entries, key=lambda e: (session_order.get(_eff(e), 3),
                                           -(mcaps.get(e.get("symbol")) or 0)))
     dt = date.fromisoformat(day_iso)
     title = f"__**{dt.strftime('%A')}, {ordinal(dt.day)} {dt.strftime('%B')}**__"
@@ -511,7 +552,7 @@ def day_table_message(day_iso: str, entries: list[dict], mcaps: dict) -> str:
                  fmt_money(mcaps.get(e.get("symbol"))),
                  fmt_eps(e.get("epsEstimate")),
                  fmt_money(e.get("revenueEstimate")),
-                 TIME_WORD.get(e.get("hour", ""), "TBD")]
+                 session_word(e)]
         lines.append(GAP.join(_cell(c, w, a) for c, (_, w, a) in zip(cells, COLS)))
     return title + "\n```\n" + header + "\n" + sep + "\n" + "\n".join(lines) + "\n```"
 
