@@ -204,9 +204,67 @@ def get_calendar(frm: date, to: date) -> list[dict]:
     return entries
 
 
+def _easter(year: int) -> date:
+    """Easter Sunday (anonymous Gregorian algorithm)."""
+    a, b, c = year % 19, year // 100, year % 100
+    d, e = b // 4, b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = c // 4, c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = ((h + l - 7 * m + 114) % 31) + 1
+    return date(year, month, day)
+
+
+def _observed(d: date) -> date:
+    """NYSE observance shift: Sat -> Friday before, Sun -> Monday after."""
+    if d.weekday() == 5:
+        return d - timedelta(days=1)
+    if d.weekday() == 6:
+        return d + timedelta(days=1)
+    return d
+
+
+def us_market_closed(d: date) -> bool:
+    """Weekends + NYSE full-day holidays, computed by rule for any year.
+    Finnhub sometimes lists ESTIMATED earnings dates that land on closed days
+    (e.g. GME 'reporting' on Labor Day) — no company reports while the US
+    market is shut, so those rows are bogus estimates and must be dropped."""
+    if d.weekday() >= 5:
+        return True
+    y = d.year
+    def nth_weekday(month, weekday, n):
+        first = date(y, month, 1)
+        return first + timedelta(days=(weekday - first.weekday()) % 7 + 7 * (n - 1))
+    last_mon_may = date(y, 5, 31)
+    last_mon_may -= timedelta(days=(last_mon_may.weekday() - 0) % 7)
+    holidays = {
+        _observed(date(y, 1, 1)),            # New Year's Day
+        nth_weekday(1, 0, 3),                # MLK Day (3rd Mon Jan)
+        nth_weekday(2, 0, 3),                # Washington's Bday (3rd Mon Feb)
+        _easter(y) - timedelta(days=2),      # Good Friday
+        last_mon_may,                        # Memorial Day (last Mon May)
+        _observed(date(y, 6, 19)),           # Juneteenth
+        _observed(date(y, 7, 4)),            # Independence Day
+        nth_weekday(9, 0, 1),                # Labor Day (1st Mon Sep)
+        nth_weekday(11, 3, 4),               # Thanksgiving (4th Thu Nov)
+        _observed(date(y, 12, 25)),          # Christmas
+    }
+    return d in holidays
+
+
 def keep(entry: dict, mcap) -> bool:
     """Filter: needs at least one estimate; mcap >= cutoff, or unknown mcap
-    but revenue est >= $1B."""
+    but revenue est >= $1B. Rows dated on a closed US market day are dropped
+    (they are unconfirmed estimates - see us_market_closed)."""
+    try:
+        if us_market_closed(date.fromisoformat(str(entry.get("date", "")))):
+            return False
+    except ValueError:
+        pass
     if entry.get("epsEstimate") is None and entry.get("revenueEstimate") is None:
         return False  # nothing to show — skip
     if mcap is not None:
