@@ -190,6 +190,42 @@ def get_mcaps(symbols: list[str]) -> dict:
 
 
 # ---- calendar ------------------------------------------------------------------
+_FMP_DATES_CACHE = {}  # (frm,to) -> (fetched_at, {symbol: iso_date})
+
+
+def _fmp_dates(frm: date, to: date) -> dict:
+    """symbol -> earnings date from the FMP calendar (2nd source for dates).
+    Cached 15 min per range; {} when no key or on any failure."""
+    key = os.environ.get("FMP_API_KEY", "").strip()
+    if not key:
+        return {}
+    ck = (frm.isoformat(), to.isoformat())
+    hit = _FMP_DATES_CACHE.get(ck)
+    if hit and time.time() - hit[0] < 900:
+        return hit[1]
+    out = {}
+    try:
+        url = ("https://financialmodelingprep.com/stable/earnings-calendar"
+               f"?from={frm.isoformat()}&to={to.isoformat()}&apikey={key}")
+        req = urllib.request.Request(url, headers={"User-Agent": "mwsbd/1.0"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            for row in json.loads(r.read().decode()):
+                s, d = row.get("symbol"), row.get("date")
+                if s and d:
+                    out[s] = d
+    except Exception as e:
+        print(f"[warn] FMP dates fetch failed: {e}")
+    _FMP_DATES_CACHE[ck] = (time.time(), out)
+    return out
+
+
+def _closed_iso(iso: str) -> bool:
+    try:
+        return us_market_closed(date.fromisoformat(str(iso)))
+    except ValueError:
+        return False
+
+
 def get_calendar(frm: date, to: date) -> list[dict]:
     entries = []
     try:
@@ -201,6 +237,18 @@ def get_calendar(frm: date, to: date) -> list[dict]:
     if not entries:  # fallback without the international flag
         data = api("calendar/earnings", {"from": frm.isoformat(), "to": to.isoformat()})
         entries = data.get("earningsCalendar", []) or []
+    # Date cross-check: Finnhub keeps ESTIMATED dates that can land on closed
+    # market days (GME "on" Labor Day). When that happens, ask FMP - if it has
+    # a plausible open-market date for the ticker, use it instead of dropping.
+    bogus = [e for e in entries if _closed_iso(e.get("date"))]
+    if bogus:
+        fixes = _fmp_dates(frm - timedelta(days=3), to + timedelta(days=4))
+        for e in bogus:
+            nd = fixes.get(e.get("symbol"))
+            if nd and not _closed_iso(nd):
+                print(f"[fix] {e.get('symbol')}: Finnhub date {e.get('date')} is a "
+                      f"closed market day -> using FMP date {nd}")
+                e["date"] = nd
     return entries
 
 
@@ -552,7 +600,10 @@ def preview():
 
 def today_mode():
     t = date.today()
-    entries = [e for e in get_calendar(t, t) if e.get("date") == t.isoformat()]
+    # fetch a few days back so entries whose bogus Finnhub date was corrected
+    # forward to today (see get_calendar) are seen and included
+    entries = [e for e in get_calendar(t - timedelta(days=5), t)
+               if e.get("date") == t.isoformat()]
     msgs = build_day_messages(entries)
     if not msgs:
         print("No earnings above the cutoff today.")
