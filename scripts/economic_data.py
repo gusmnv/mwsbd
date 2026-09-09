@@ -307,6 +307,14 @@ def main():
                 ACTUALS_FILE.write_text(json.dumps(actuals, indent=0))
             except Exception:
                 pass
+            # a recap only earns its post if at least one event has an ACTUAL -
+            # a speech-only day would just repeat the morning calendar (noise)
+            def _has_actual(dt, ev):
+                key = f"{today_et.isoformat()}|{ev.get('country','').upper()}|{ev.get('title','')}"
+                return bool(actuals.get(key))
+            if not any(_has_actual(dt, ev) for dt, ev in by_day[today_et]):
+                print("No actuals today (speeches only) - skipping recap.")
+                return
             post_text("**DAILY RECAP**")
             time.sleep(1)
             for chunk in split_message(recap_table_message(today_et, by_day[today_et], actuals)):

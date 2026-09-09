@@ -781,8 +781,33 @@ def recap_table_message(day_iso: str, entries: list[dict], mcaps: dict) -> str:
     return title + "\n```\n" + header + "\n" + sep + "\n" + "\n".join(lines) + "\n```"
 
 
+def _fmp_actuals_range(frm: date, to: date) -> list[dict]:
+    """FMP actuals for the window, converted to Finnhub-style keys."""
+    key = os.environ.get("FMP_API_KEY", "").strip()
+    if not key:
+        return []
+    import urllib.request as _ur
+    url = (f"https://financialmodelingprep.com/stable/earnings-calendar"
+           f"?from={frm.isoformat()}&to={to.isoformat()}&apikey={key}")
+    try:
+        with _ur.urlopen(_ur.Request(url, headers={"User-Agent": "mwsbd/1.0"}), timeout=20) as r:
+            rows = json.loads(r.read().decode())
+    except Exception as e:
+        print(f"[warn] FMP actuals fetch failed: {e}")
+        return []
+    return [{"symbol": r.get("symbol"), "date": r.get("date"),
+             "epsActual": r.get("epsActual"), "epsEstimate": r.get("epsEstimated"),
+             "revenueActual": r.get("revenueActual"), "revenueEstimate": r.get("revenueEstimated")}
+            for r in rows if r.get("epsActual") is not None]
+
+
 def _reported_between(frm: date, to: date) -> list[dict]:
     entries = [e for e in get_calendar(frm, to) if e.get("epsActual") is not None]
+    # merge FMP actuals: fills anything Finnhub is late on (or never delivers)
+    have = {(e.get("symbol"), e.get("date")) for e in entries}
+    for r in _fmp_actuals_range(frm, to):
+        if (r["symbol"], r["date"]) not in have:
+            entries.append(r)
     if not entries:
         return []
     mcaps = get_mcaps(sorted({e["symbol"] for e in entries if e.get("symbol")}))
