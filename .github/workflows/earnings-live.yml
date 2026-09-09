@@ -14,7 +14,7 @@ concurrency:
 jobs:
   watch:
     runs-on: ubuntu-latest
-    timeout-minutes: 235
+    timeout-minutes: 330
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -27,10 +27,10 @@ jobs:
           t1=$(date -u -d "today 10:00 UTC" +%s)   # 06:00 ET - pre-market reporters start here
           t2=$(date -u -d "today 20:00 UTC" +%s)   # 16:00 ET - after-hours session
           TOL=5400   # <=90 min late still joins its own session; later than that, skip
-          if   [ "$now" -lt "$t1" ] && [ "$((t1-now))" -le "$TOL" ]; then target=$t1; mins=210
-          elif [ "$now" -ge "$t1" ] && [ "$now" -lt "$((t1+TOL))" ]; then target=$now; mins=$(( (t1+12600-now)/60 )); echo "LATE: joining morning session $(( (now-t1)/60 )) min late"
-          elif [ "$now" -lt "$t2" ] && [ "$((t2-now))" -le "$TOL" ]; then target=$t2; mins=115
-          elif [ "$now" -ge "$t2" ] && [ "$now" -lt "$((t2+TOL))" ]; then target=$now; mins=$(( (t2+6900-now)/60 )); echo "LATE: joining evening session $(( (now-t2)/60 )) min late"
+          if   [ "$now" -lt "$t1" ] && [ "$((t1-now))" -le "$TOL" ]; then target=$t1; mins=230
+          elif [ "$now" -ge "$t1" ] && [ "$now" -lt "$((t1+TOL))" ]; then target=$now; mins=$(( (t1+13800-now)/60 )); echo "LATE: joining morning session $(( (now-t1)/60 )) min late"
+          elif [ "$now" -lt "$t2" ] && [ "$((t2-now))" -le "$TOL" ]; then target=$t2; mins=228
+          elif [ "$now" -ge "$t2" ] && [ "$now" -lt "$((t2+TOL))" ]; then target=$now; mins=$(( (t2+13680-now)/60 )); echo "LATE: joining evening session $(( (now-t2)/60 )) min late"
           elif [ "$now" -lt "$t2" ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; echo "mins=0" >> "$GITHUB_OUTPUT"; echo "Missed the morning window; evening is $(( (t2-now)/60 )) min away - skipping, never sleeping across sessions"; exit 0
           else echo "skip=true" >> "$GITHUB_OUTPUT"; echo "mins=0" >> "$GITHUB_OUTPUT"; echo "Too late for any session today - skipping"; exit 0; fi
           echo "mins=$mins" >> "$GITHUB_OUTPUT"
