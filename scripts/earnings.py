@@ -9,7 +9,7 @@ Modes:
 Line format (QuarterChart style):
   🇺🇸 $AVGO · $780B · EPS est $3.30 · Rev est $15.2B · After close
 
-Filters: market cap >= MIN_MCAP_B (billions USD, default 5).
+Filters: market cap >= MIN_MCAP_B (billions USD, default 10).
 Companies whose market cap is unavailable are kept if their revenue
 estimate is >= $1B (so internationals without profile data still show).
 
@@ -17,7 +17,7 @@ Required env vars:
   DISCORD_WEBHOOK_STOCK_EARNINGS — webhook URL of the #stock-earnings channel
   FINNHUB_API_KEY                — free key from finnhub.io
 Optional:
-  MIN_MCAP_B                    — market-cap cutoff in $B (default "5")
+  MIN_MCAP_B                    — market-cap cutoff in $B (default "10")
 """
 import json
 import os
@@ -30,7 +30,7 @@ from pathlib import Path
 
 WEBHOOK = os.environ.get("DISCORD_WEBHOOK_STOCK_EARNINGS", "").strip()
 API_KEY = os.environ.get("FINNHUB_API_KEY", "").strip()
-MIN_MCAP_B = float(os.environ.get("MIN_MCAP_B", "5"))
+MIN_MCAP_B = float(os.environ.get("MIN_MCAP_B", "10"))
 
 STATE_DIR = Path(__file__).resolve().parent.parent / "state"
 REPORTED_FILE = STATE_DIR / "reported_earnings.json"

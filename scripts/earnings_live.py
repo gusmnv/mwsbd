@@ -9,7 +9,7 @@ NO teaser posts - one message per company, the full numbers, as fast as possible
             Polled every ~4s (every 2s while something is hot).
   Layer 2 - Finnhub: slower backup (~20-30 min lag), polled every ~16s.
 
-Only companies >= MIN_MCAP_B (default $5B), same rule as everything else.
+Only companies >= MIN_MCAP_B (default $10B), same rule as everything else.
 
 Usage:  python earnings_live.py            (runs for LIVE_MINUTES, default 120)
 
@@ -309,7 +309,8 @@ def main():
                 print(f"FILED {sym} ({acc}) - parsing press release NOW")
 
         # Layer -1: parse the press release itself - numbers within seconds
-        for sym in list(hot):
+        # burst-safe: biggest company first, so NVDA never waits behind a small cap
+        for sym in sorted(hot, key=lambda x: -(mcaps.get(x) or 0)):
             if f"{sym}:{today.isoformat()}" in reported:
                 hot.pop(sym); continue
             h = hot[sym]
