@@ -42,7 +42,7 @@ jobs:
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           LIVE_MINUTES: ${{ steps.cfg.outputs.mins }}
-          MIN_MCAP_B: "5"
+          MIN_MCAP_B: "10"
         run: python scripts/earnings_live.py
       - name: Save state
         if: always()
