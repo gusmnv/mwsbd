@@ -347,9 +347,9 @@ def main():
                     fc, av = parse_forecast(fc_raw), parse_forecast(actual_s)
                     if fc is not None and av is not None:
                         verdict = "ABOVE FORECAST" if av > fc else ("BELOW FORECAST" if av < fc else "IN LINE")
-                        msg = f"🔴 **{cur} {title}: {actual_s}** vs forecast {fc_raw} — **{verdict}**"
+                        msg = f"🚨 **{cur} {title}: {actual_s}** vs forecast {fc_raw} — **{verdict}**"
                     else:
-                        msg = f"🔴 **{cur} {title}: {actual_s}**"
+                        msg = f"🚨 **{cur} {title}: {actual_s}**"
                     try:
                         post_discord(msg)
                         print("POSTED(FMP):", msg)
@@ -387,15 +387,15 @@ def main():
             title = w["ev"]["title"]
             fc_raw = w["ev"].get("forecast")
             if v == "STATEMENT":
-                msg = f"🔴 **US — FOMC statement released.** Rate decision & guidance are out."
+                msg = f"🚨 **US — FOMC statement released.** Rate decision & guidance are out."
             else:
                 actual_s = fmt_actual(v, unit)
                 fc = parse_forecast(fc_raw)
                 if fc is not None:
                     verdict = "ABOVE FORECAST" if float(v) > fc else ("BELOW FORECAST" if float(v) < fc else "IN LINE")
-                    msg = (f"🔴 **US {title}: {actual_s}** vs forecast {fc_raw} — **{verdict}**")
+                    msg = (f"🚨 **US {title}: {actual_s}** vs forecast {fc_raw} — **{verdict}**")
                 else:
-                    msg = f"🔴 **US {title}: {actual_s}**"
+                    msg = f"🚨 **US {title}: {actual_s}**"
                 # HORARIO E CHAVE: key by the event's UTC date so the 23:59
                 # recap (which now groups/looks up by UTC day) finds it.
                 actuals[f"{w['dt'].astimezone(_tzu.utc).date().isoformat()}|USD|{title}"] = actual_s
