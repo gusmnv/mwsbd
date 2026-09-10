@@ -43,6 +43,7 @@ jobs:
           BEA_API_KEY: ${{ secrets.BEA_API_KEY }}
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           LIVE_MINUTES: ${{ steps.cfg.outputs.mins }}
+          PYTHONUNBUFFERED: "1"
         run: python scripts/economic_live.py
       - name: Save captured actuals
         if: always()
