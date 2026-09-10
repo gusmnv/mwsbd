@@ -289,7 +289,11 @@ def main():
             dt = datetime.fromisoformat(ev["date"])
         except Exception:
             continue
-        if dt.date() != today or not (now_et - timedelta(minutes=10) <= dt <= session_end_et):
+        # late-join tolerance: a session that starts late must still pick up
+        # releases from the last 75 min - the FMP layer posts them immediately
+        # (late but never silent). Handlers for already-released events simply
+        # never fire; the USD->FMP fallback covers them.
+        if dt.date() != today or not (now_et - timedelta(minutes=75) <= dt <= session_end_et):
             continue
         cur = ev.get("country", "").upper()
         # USD majors: official-API handler with 1s burst. Everything else
