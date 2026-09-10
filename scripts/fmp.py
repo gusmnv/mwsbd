@@ -34,6 +34,10 @@ STOP = {"m", "mm", "yy", "q", "change", "index", "rate", "flash", "final",
         "prelim", "preliminary", "revised", "the", "of", "and", "s", "adv"}
 
 ALIASES = [
+    (r"core ppi", "core ppi mom"),
+    (r"\bppi\b|producer price", "producer price index"),
+    (r"main refinancing rate|ecb .*rate", "interest rate decision"),
+    (r"official bank rate|boe .*rate", "interest rate decision"),
     (r"non-?farm employment change|non-?farm payrolls", "nonfarm payrolls"),
     (r"unemployment claims|initial (jobless )?claims", "initial jobless claims"),
     (r"jolts", "jolts job openings"),
@@ -51,7 +55,11 @@ ALIASES = [
 
 
 def _tok(s):
-    s = re.sub(r"[^a-z0-9 /%.]", " ", str(s).lower())
+    s = str(s).lower()
+    # m/m vs y/y vs q/q is the WHOLE difference between 0.4% and 5.4% -
+    # normalize to distinct tokens before splitting on "/"
+    s = s.replace("m/m", " mom ").replace("y/y", " yoy ").replace("q/q", " qoq ")
+    s = re.sub(r"[^a-z0-9 /%.]", " ", s)
     return {t for t in re.split(r"[ /]+", s) if t and t not in STOP}
 
 

@@ -162,7 +162,12 @@ class BLSHandler:
 
     def value(self):
         rows = bls_series([self.series]).get(self.series, [])
-        if not rows or not self.before:
+        if not rows:
+            return None
+        if not self.before:
+            # snapshot failed at session start (BLS hiccup) - late baseline:
+            # take what we see now and detect the NEXT change, never stall forever
+            self.before = rows[0][0]
             return None
         if rows[0][0] == self.before:      # no new period yet
             return None
@@ -314,8 +319,12 @@ def main():
 
         # ---- FMP layer: global events without an official-API handler ----
         if time.time() >= next_fmp:
-            pend = [w for w in watch
-                    if not w["done"] and w["h"] is None and now >= w["dt"] - timedelta(minutes=2)]
+            # FMP covers: (a) non-US events, (b) US events whose official-API
+            # handler hasn't delivered 150s after the release (BLS hiccup) -
+            # the number must reach the channel no matter which source wins.
+            pend = [w for w in watch if not w["done"] and (
+                        (w["h"] is None and now >= w["dt"] - timedelta(minutes=2)) or
+                        (w["h"] is not None and now >= w["dt"] + timedelta(seconds=150)))]
             if pend and F.API_KEY:
                 rows = F.fetch(today.isoformat(), today.isoformat())
                 for w in pend:
