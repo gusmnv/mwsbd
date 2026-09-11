@@ -509,6 +509,7 @@ def main():
                 continue
             print(f"PAGE LIVE: {pkey} release is up - parsing")
             for w in mapped:
+              try:   # one bad event must NEVER kill the session
                 v = pg_extract(pkey, w["metric"], pw.text)
                 if v is None:
                     print(f"[warn] page parse missed {w['ev']['title']} - left to API/FMP")
@@ -530,6 +531,8 @@ def main():
                     actuals[f"{w['dt'].astimezone(_tzu.utc).date().isoformat()}|USD|{title}"] = actual_s
                 except Exception as e:
                     print(f"[warn] discord post failed: {e}")
+              except Exception as e:
+                print(f"[warn] page event {w['ev'].get('title','?')} failed: {e}")
 
         # ---- FMP layer: global events without an official-API handler ----
         if time.time() >= next_fmp:
@@ -547,6 +550,7 @@ def main():
             if pend and F.API_KEY:
                 rows = F.fetch(today.isoformat(), today.isoformat())
                 for w in pend:
+                  try:   # one bad event must NEVER kill the session
                     ev = w["ev"]
                     cur = ev.get("country", "").upper()
                     title = str(ev.get("title", ""))
@@ -572,6 +576,8 @@ def main():
                         actuals[f"{w['dt'].astimezone(_tzu.utc).date().isoformat()}|{cur}|{title}"] = actual_s
                     except Exception as e:
                         print(f"[warn] discord post failed: {e}")
+                  except Exception as e:
+                    print(f"[warn] FMP event {w['ev'].get('title','?')} failed: {e}")
             # adaptive cadence: 10s while an FMP-covered release is inside its
             # hot window (release-2min .. release+10min) so it lands within
             # seconds of FMP publishing; 60s otherwise. Starter plan allows it.

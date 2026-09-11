@@ -126,7 +126,10 @@ def fmt_like(actual, forecast_str):
     f = str(forecast_str or "")
     m = re.search(r"\d+\.(\d+)", f)
     dec = len(m.group(1)) if m else 0
-    suffix = f[-1] if f[-1:] in "%KMB" else ""
+    # NOTE: '"" in "%KMB"' is True in Python - an empty forecast (UoM Inflation
+    # Expectations has none) used to hit f[-1] and crash the whole session
+    # (2026-09-11 14:02:47 IndexError). Guard on non-empty explicitly.
+    suffix = f[-1] if (f and f[-1] in "%KMB") else ""
     if suffix == "K" and abs(a) >= 20000:
         a /= 1000.0
     elif suffix == "M" and abs(a) >= 20000:
