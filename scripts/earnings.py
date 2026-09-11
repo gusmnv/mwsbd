@@ -802,11 +802,15 @@ def _fmp_actuals_range(frm: date, to: date) -> list[dict]:
 
 
 def _reported_between(frm: date, to: date) -> list[dict]:
-    entries = [e for e in get_calendar(frm, to) if e.get("epsActual") is not None]
-    # merge FMP actuals: fills anything Finnhub is late on (or never delivers)
+    cal = get_calendar(frm, to)
+    expected = {e.get("symbol") for e in cal if e.get("symbol")}
+    entries = [e for e in cal if e.get("epsActual") is not None]
+    # merge FMP actuals: fills anything Finnhub is late on (or never delivers).
+    # ONLY for symbols in OUR calendar - otherwise foreign ADR variants leak in
+    # (e.g. Inditex showing twice as IDEXY + IDEXF).
     have = {(e.get("symbol"), e.get("date")) for e in entries}
     for r in _fmp_actuals_range(frm, to):
-        if (r["symbol"], r["date"]) not in have:
+        if r["symbol"] in expected and (r["symbol"], r["date"]) not in have:
             entries.append(r)
     if not entries:
         return []

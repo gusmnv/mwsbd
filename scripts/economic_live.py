@@ -283,7 +283,17 @@ def main():
     events = json.loads(http_get(FEED_URL).decode())
     watch = []
     for ev in events:
-        if ev.get("impact", "").title() != "High":
+        imp = ev.get("impact", "").title()
+        cur = ev.get("country", "").upper()
+        # "tem de sair tudo o que for data": for USD we watch every DATA
+        # release, High or Medium (e.g. Unemployment Claims is Medium on FF).
+        # A "data" event is one with a forecast or previous value - speeches
+        # have neither and are never postable numbers, so they are skipped.
+        is_data = bool(str(ev.get("forecast") or "").strip() or str(ev.get("previous") or "").strip())
+        if cur == "USD":
+            if imp not in ("High", "Medium") or not is_data:
+                continue
+        elif imp != "High":
             continue
         try:
             dt = datetime.fromisoformat(ev["date"])
@@ -295,14 +305,13 @@ def main():
         # never fire; the USD->FMP fallback covers them.
         if dt.date() != today or not (now_et - timedelta(minutes=75) <= dt <= session_end_et):
             continue
-        cur = ev.get("country", "").upper()
         # USD majors: official-API handler with 1s burst. Everything else
         # (EUR, GBP, JPY, CAD, ...): FMP layer at a relaxed cadence.
         h = match_handler(ev.get("title", "")) if cur == "USD" else None
         watch.append({"ev": ev, "dt": dt, "h": h, "done": False})
 
     if not watch:
-        print("No High-impact events in this window. Exiting.")
+        print("No watchable data events in this window. Exiting.")
         return
     print("Watching:", ", ".join(f"{w['ev'].get('country','?')} {w['ev']['title']}" for w in watch))
     for w in watch:
@@ -357,7 +366,13 @@ def main():
                         actuals[f"{w['dt'].astimezone(_tzu.utc).date().isoformat()}|{cur}|{title}"] = actual_s
                     except Exception as e:
                         print(f"[warn] discord post failed: {e}")
-            next_fmp = time.time() + 60  # free-tier budget: ~1 call/min max
+            # adaptive cadence: 10s while an FMP-covered release is inside its
+            # hot window (release-2min .. release+10min) so it lands within
+            # seconds of FMP publishing; 60s otherwise. Starter plan allows it.
+            hot_fmp = any((not w["done"]) and w["h"] is None and
+                          w["dt"] - timedelta(minutes=2) <= now <= w["dt"] + timedelta(minutes=10)
+                          for w in watch)
+            next_fmp = time.time() + (10 if hot_fmp else 60)
 
         polled_hot = False
         for w in watch:
