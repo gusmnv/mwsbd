@@ -335,9 +335,14 @@ def main():
             # FMP covers: (a) non-US events, (b) US events whose official-API
             # handler hasn't delivered 150s after the release (BLS hiccup) -
             # the number must reach the channel no matter which source wins.
+            # Handler-backed events fall back to FMP after 45s (was 150s: CPI
+            # 2026-09-11 posted +2m28s..+3m32s because BLS 503'd and the
+            # fallback sat idle) - or IMMEDIATELY once the handler has failed
+            # twice after the release (it is clearly down, no point waiting).
             pend = [w for w in watch if not w["done"] and (
                         (w["h"] is None and now >= w["dt"] - timedelta(minutes=2)) or
-                        (w["h"] is not None and now >= w["dt"] + timedelta(seconds=150)))]
+                        (w["h"] is not None and now >= w["dt"] and (
+                            now >= w["dt"] + timedelta(seconds=45) or w.get("errs", 0) >= 2)))]
             if pend and F.API_KEY:
                 rows = F.fetch(today.isoformat(), today.isoformat())
                 for w in pend:
@@ -369,7 +374,7 @@ def main():
             # adaptive cadence: 10s while an FMP-covered release is inside its
             # hot window (release-2min .. release+10min) so it lands within
             # seconds of FMP publishing; 60s otherwise. Starter plan allows it.
-            hot_fmp = any((not w["done"]) and w["h"] is None and
+            hot_fmp = any((not w["done"]) and
                           w["dt"] - timedelta(minutes=2) <= now <= w["dt"] + timedelta(minutes=10)
                           for w in watch)
             next_fmp = time.time() + (10 if hot_fmp else 60)
@@ -377,6 +382,10 @@ def main():
         polled_hot = False
         for w in watch:
             if w["done"] or w["h"] is None or now < w["dt"] - timedelta(seconds=30):
+                continue
+            # quota guard: past release+10min FMP owns the event - stop burning
+            # the BLS/BEA daily key on an API that clearly isn't updating.
+            if now > w["dt"] + timedelta(minutes=10):
                 continue
             # BLS rate-limit guard (Friday NFP: 1s hammering from T-45s made
             # BLS 503 the key for the rest of the day). Rules now:
@@ -394,6 +403,8 @@ def main():
             try:
                 res = w["h"].value()
             except Exception as e:
+                if now >= w["dt"]:
+                    w["errs"] = w.get("errs", 0) + 1   # lets FMP take over at once
                 print(f"[warn] poll failed {w['ev']['title']}: {e}")
                 continue
             if res is None:
