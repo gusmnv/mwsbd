@@ -1,0 +1,27 @@
+name: net-test
+on: workflow_dispatch
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: probe official sources from GitHub runner
+        run: |
+          echo "runner public IP:"
+          curl -s -m 8 https://api.ipify.org || true
+          echo
+          probe () {
+            for i in 1 2 3; do
+              out=$(curl -sS -o /dev/null -m 12 -w "%{http_code} in %{time_total}s" \
+                    -A "mwsbd/1.0 (alternartivebull@gmail.com)" "$1" 2>&1) || out="ERROR: $out"
+              echo "  try $i -> $out"
+              sleep 2
+            done
+          }
+          echo "== BLS API v2 (same endpoint the bot uses) =="
+          probe "https://api.bls.gov/publicAPI/v2/timeseries/data/CUSR0000SA0"
+          echo "== BLS news release page (cpi.nr0.htm) =="
+          probe "https://www.bls.gov/news.release/cpi.nr0.htm"
+          echo "== SEC EDGAR current 8-K feed =="
+          probe "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=8-K&company=&dateb=&owner=include&count=10&output=atom"
