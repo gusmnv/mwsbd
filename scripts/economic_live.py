@@ -21,7 +21,7 @@ import re
 import sys
 import time
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -271,6 +271,148 @@ def parse_forecast(s):
         return None
 
 
+# ════════════ Layer 0: OFFICIAL BLS NEWS-RELEASE PAGES (fastest path) ════════
+# 2026-09-11 CPI: api.bls.gov collapsed (503) exactly at 12:30 UTC under the
+# global hammering; the news-release PAGE is a CDN-served static file that
+# answered in 0.03-0.12s from the same runner. The page is published at the
+# exact release second - so THE PAGE is the primary source, the API a backup.
+
+BLS_PAGES = {
+    "cpi":    "https://www.bls.gov/news.release/cpi.nr0.htm",
+    "ppi":    "https://www.bls.gov/news.release/ppi.nr0.htm",
+    "empsit": "https://www.bls.gov/news.release/empsit.nr0.htm",
+}
+
+# FF event title pattern -> (page key, metric)
+PAGE_METRICS = [
+    (r"(?i)^core\s+cpi\s+m/m", "cpi", "core_mm"),
+    (r"(?i)^core\s+cpi\s+y/y", "cpi", "core_yy"),
+    (r"(?i)^cpi\s+m/m",        "cpi", "all_mm"),
+    (r"(?i)^cpi\s+y/y",        "cpi", "all_yy"),
+    (r"(?i)^ppi\s+m/m",        "ppi", "all_mm"),
+    (r"(?i)^ppi\s+y/y",        "ppi", "all_yy"),
+    (r"(?i)non-?farm\s+employment", "empsit", "nfp"),
+    (r"(?i)^unemployment\s+rate",   "empsit", "unrate"),
+    (r"(?i)average\s+hourly\s+earnings", "empsit", "ahe_mm"),
+]
+
+_PG_UP = r"rose|increased|moved\s+up|advanced|edged\s+up|climbed|grew"
+_PG_DOWN = r"fell|declined|decreased|moved\s+down|edged\s+down|dropped"
+_PG_MONTHS = {m.lower(): i for i, m in enumerate(
+    ["January", "February", "March", "April", "May", "June", "July",
+     "August", "September", "October", "November", "December"], 1)}
+
+
+def _pg_move(text, lead, tail=""):
+    """'<lead> rose 0.3 percent<tail>' -> signed float; 'was unchanged' -> 0."""
+    m = re.search(rf"(?is){lead}\s+({_PG_UP}|{_PG_DOWN})\s+([\d.]+)\s*percent{tail}", text)
+    if m:
+        v = float(m.group(2))
+        return -v if re.fullmatch(rf"(?i)(?:{_PG_DOWN})", m.group(1)) else v
+    if re.search(rf"(?is){lead}\s+was\s+unchanged", text):
+        return 0.0
+    return None
+
+
+def pg_extract(page_key, metric, text):
+    """Extract one FF metric from the official release text. None if unsure -
+    the API/FMP layers then take over (never guess an official number)."""
+    if page_key == "cpi":
+        if metric == "all_mm":
+            return _pg_move(text, r"Consumer Price Index for All Urban Consumers \(CPI-U\)",
+                            r"\s+on\s+a\s+seasonally")
+        if metric == "all_yy":
+            return _pg_move(text, r"the\s+all\s+items\s+index",
+                            r"(?=\s+(?:before\s+seasonal|for\s+the\s+12\s+months|over\s+the))")
+        if metric == "core_mm":
+            return _pg_move(text, r"index\s+for\s+all\s+items\s+less\s+food\s+and\s+energy",
+                            r"(?!\s+over\s+the\s+(?:year|last|past))")
+        if metric == "core_yy":
+            return _pg_move(text, r"all\s+items\s+less\s+food\s+and\s+energy\s+index",
+                            r"(?=\s+over\s+the\s+(?:year|last|past))")
+    if page_key == "ppi":
+        if metric == "all_mm":
+            return _pg_move(text, r"Producer\s+Price\s+Index\s+for\s+final\s+demand")
+        if metric == "all_yy":
+            return _pg_move(text, r"(?:the\s+)?index\s+for\s+final\s+demand",
+                            r"\s+for\s+the\s+12\s+months")
+    if page_key == "empsit":
+        if metric == "nfp":
+            m = re.search(rf"(?is)Total\s+nonfarm\s+payroll\s+employment\s+({_PG_UP}|{_PG_DOWN})"
+                          r"\s+by\s+([\d,]+)", text)
+            if m:
+                v = float(m.group(2).replace(",", "")) / 1000.0
+                return -v if re.fullmatch(rf"(?i)(?:{_PG_DOWN})", m.group(1)) else v
+            m = re.search(r"(?is)Total\s+nonfarm\s+payroll\s+employment\s+"
+                          r"(?:changed\s+little|was\s+(?:essentially\s+)?unchanged)"
+                          r"[^(]{0,50}\(([+-])([\d,]+)\)", text)
+            if m:
+                v = float(m.group(2).replace(",", "")) / 1000.0
+                return -v if m.group(1) == "-" else v
+            return None
+        if metric == "unrate":
+            m = re.search(r"(?is)unemployment\s+rate\s+(?:was\s+unchanged\s+at|held\s+at|"
+                          r"remained\s+at|was|(?:rose|increased|edged\s+up|declined|"
+                          r"decreased|edged\s+down|fell)\s+to)\s+([\d.]+)\s*percent", text)
+            return float(m.group(1)) if m else None
+        if metric == "ahe_mm":
+            m = re.search(r"(?is)average\s+hourly\s+earnings[^.]{0,140}?"
+                          rf"({_PG_UP}|{_PG_DOWN})\s+by\s+\d+\s+cents?,\s+or\s+([\d.]+)\s*percent",
+                          text)
+            if m:
+                v = float(m.group(2))
+                return -v if re.fullmatch(rf"(?i)(?:{_PG_DOWN})", m.group(1)) else v
+            return None
+    return None
+
+
+class PageWatch:
+    """Polls one BLS news-release page with cheap conditional GETs; marks
+    itself fresh only when the page's embargo date == today (ET)."""
+    def __init__(self, key, url):
+        self.key, self.url = key, url
+        self.etag = None
+        self.lastmod = None
+        self.text = None
+        self.fresh = False
+        self.next_poll = 0.0
+
+    def _release_date(self, txt):
+        m = re.search(r"(?is)embargoed\s+until.{0,200}?"
+                      r"(January|February|March|April|May|June|July|August|"
+                      r"September|October|November|December)\s+(\d{1,2}),\s+(\d{4})", txt)
+        if not m:
+            return None
+        try:
+            return date(int(m.group(3)), _PG_MONTHS[m.group(1).lower()], int(m.group(2)))
+        except (KeyError, ValueError):
+            return None
+
+    def poll(self, today_et) -> bool:
+        """One conditional GET (3s timeout). True when today's release is up."""
+        req = urllib.request.Request(self.url, headers={
+            "User-Agent": "mwsbd/1.0 (contact: alternartivebull@gmail.com)",
+            "Accept-Encoding": "identity"})
+        if self.etag:
+            req.add_header("If-None-Match", self.etag)
+        if self.lastmod:
+            req.add_header("If-Modified-Since", self.lastmod)
+        try:
+            with urllib.request.urlopen(req, timeout=3) as r:
+                raw = r.read().decode(errors="replace")
+                self.etag = r.headers.get("ETag") or self.etag
+                self.lastmod = r.headers.get("Last-Modified") or self.lastmod
+        except urllib.error.HTTPError as e:
+            if e.code == 304:
+                return False        # unchanged - the cheap common case
+            raise
+        txt = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", raw))
+        if self._release_date(txt) == today_et:
+            self.text, self.fresh = txt, True
+            return True
+        return False
+
+
 # ---------------------------------------------------------------- main session
 def main():
     if not WEBHOOK:
@@ -308,7 +450,13 @@ def main():
         # USD majors: official-API handler with 1s burst. Everything else
         # (EUR, GBP, JPY, CAD, ...): FMP layer at a relaxed cadence.
         h = match_handler(ev.get("title", "")) if cur == "USD" else None
-        watch.append({"ev": ev, "dt": dt, "h": h, "done": False})
+        w = {"ev": ev, "dt": dt, "h": h, "done": False, "page": None, "metric": None}
+        if cur == "USD":
+            for pat, pkey, metric in PAGE_METRICS:
+                if re.search(pat, ev.get("title", "")):
+                    w["page"], w["metric"] = pkey, metric
+                    break
+        watch.append(w)
 
     if not watch:
         print("No watchable data events in this window. Exiting.")
@@ -327,8 +475,61 @@ def main():
     from datetime import timezone as _tzu
     next_fmp = 0.0
 
+    # one PageWatch per unique BLS release page among today's events
+    pages = {}
+    for w in watch:
+        if w["page"]:
+            pages.setdefault(w["page"], PageWatch(w["page"], BLS_PAGES[w["page"]]))
+    if pages:
+        print("Page layer armed:", ", ".join(pages))
+
     while time.time() < deadline and any(not w["done"] for w in watch):
         now = datetime.now(ET)
+
+        # ---- Layer 0: official news-release pages, 1s conditional GETs ----
+        # (separate host from api.bls.gov; a 304 costs ~0.03s)
+        for pkey, pw in pages.items():
+            if pw.fresh or time.time() < pw.next_poll:
+                continue
+            mapped = [w for w in watch if not w["done"] and w["page"] == pkey]
+            if not mapped:
+                continue
+            # poll only in the window release-20s .. release+4min
+            if not any(w["dt"] - timedelta(seconds=20) <= now <= w["dt"] + timedelta(minutes=4)
+                       for w in mapped):
+                continue
+            pw.next_poll = time.time() + 1
+            try:
+                pw.poll(now.date())
+            except Exception as e:
+                print(f"[warn] page poll failed {pkey}: {e}")
+                pw.next_poll = time.time() + 2
+                continue
+            if not pw.fresh:
+                continue
+            print(f"PAGE LIVE: {pkey} release is up - parsing")
+            for w in mapped:
+                v = pg_extract(pkey, w["metric"], pw.text)
+                if v is None:
+                    print(f"[warn] page parse missed {w['ev']['title']} - left to API/FMP")
+                    continue
+                title = w["ev"]["title"]
+                fc_raw = w["ev"].get("forecast")
+                actual_s = F.fmt_like(v, fc_raw) if fc_raw else f"{v}%"
+                fc = parse_forecast(fc_raw)
+                if fc is not None:
+                    verdict = ("ABOVE FORECAST" if v > fc else
+                               ("BELOW FORECAST" if v < fc else "IN LINE"))
+                    msg = f"\U0001f6a8 **US {title}: {actual_s}** vs forecast {fc_raw} — **{verdict}**"
+                else:
+                    msg = f"\U0001f6a8 **US {title}: {actual_s}**"
+                try:
+                    post_discord(msg)
+                    print("POSTED(PAGE):", msg)
+                    w["done"] = True
+                    actuals[f"{w['dt'].astimezone(_tzu.utc).date().isoformat()}|USD|{title}"] = actual_s
+                except Exception as e:
+                    print(f"[warn] discord post failed: {e}")
 
         # ---- FMP layer: global events without an official-API handler ----
         if time.time() >= next_fmp:
