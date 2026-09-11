@@ -250,6 +250,22 @@ def get_calendar(frm: date, to: date) -> list[dict]:
                 print(f"[fix] {e.get('symbol')}: Finnhub date {e.get('date')} is a "
                       f"closed market day -> using FMP date {nd}")
                 e["date"] = nd
+    # ESTIMATES: FMP is the source of record - it tracks the street consensus
+    # that Twitter/terminals show. Finnhub's own consensus can drift (ADBE
+    # 2026-09-10: Finnhub est 6.20 vs street 6.08 -> flipped a BEAT into a
+    # "MISS"). Finnhub value stays only where FMP has none.
+    try:
+        fmp_est = _fmp_estimates_range(frm, to)
+        for e in entries:
+            fe = fmp_est.get(e.get("symbol"))
+            if not fe:
+                continue
+            if fe.get("eps") is not None:
+                e["epsEstimate"] = fe["eps"]
+            if fe.get("rev") is not None:
+                e["revenueEstimate"] = fe["rev"]
+    except Exception as ex:
+        print(f"[warn] FMP estimate overlay failed: {ex}")
     return entries
 
 
@@ -781,8 +797,8 @@ def recap_table_message(day_iso: str, entries: list[dict], mcaps: dict) -> str:
     return title + "\n```\n" + header + "\n" + sep + "\n" + "\n".join(lines) + "\n```"
 
 
-def _fmp_actuals_range(frm: date, to: date) -> list[dict]:
-    """FMP actuals for the window, converted to Finnhub-style keys."""
+def _fmp_calendar_rows(frm: date, to: date) -> list[dict]:
+    """Raw FMP earnings-calendar rows for the window ([] without a key)."""
     key = os.environ.get("FMP_API_KEY", "").strip()
     if not key:
         return []
@@ -791,10 +807,23 @@ def _fmp_actuals_range(frm: date, to: date) -> list[dict]:
            f"?from={frm.isoformat()}&to={to.isoformat()}&apikey={key}")
     try:
         with _ur.urlopen(_ur.Request(url, headers={"User-Agent": "mwsbd/1.0"}), timeout=20) as r:
-            rows = json.loads(r.read().decode())
+            return json.loads(r.read().decode())
     except Exception as e:
-        print(f"[warn] FMP actuals fetch failed: {e}")
+        print(f"[warn] FMP calendar fetch failed: {e}")
         return []
+
+
+def _fmp_estimates_range(frm: date, to: date) -> dict:
+    """symbol -> {'eps': epsEstimated, 'rev': revenueEstimated} from FMP."""
+    return {r.get("symbol"): {"eps": r.get("epsEstimated"), "rev": r.get("revenueEstimated")}
+            for r in _fmp_calendar_rows(frm, to)
+            if r.get("symbol") and (r.get("epsEstimated") is not None
+                                    or r.get("revenueEstimated") is not None)}
+
+
+def _fmp_actuals_range(frm: date, to: date) -> list[dict]:
+    """FMP actuals for the window, converted to Finnhub-style keys."""
+    rows = _fmp_calendar_rows(frm, to)
     return [{"symbol": r.get("symbol"), "date": r.get("date"),
              "epsActual": r.get("epsActual"), "epsEstimate": r.get("epsEstimated"),
              "revenueActual": r.get("revenueActual"), "revenueEstimate": r.get("revenueEstimated")}

@@ -77,7 +77,9 @@ def _num(tok) -> float:
 
 
 _REV_SENT = re.compile(
-    r"(?i)(?:net sales|net revenues?|total (?:net )?revenues?|revenues?)\s+"
+    r"(?i)(?<!increase in )(?<!decrease in )(?<!growth in )"
+    r"(?:net sales|net revenues?|total (?:net )?revenues?|revenues?)"
+    r"(?:,[^\n]{0,90}?)?\s+"    # allow "revenue, gross profit, and net income attributable to X, Inc. were $1.2 billion" (CPRT style)
     r"(?:were|was|of|(?:increased|decreased|grew|rose|declined|improved|fell)[^.\n]{0,60}?to)\s+"
     r"\$\s?([\d,]+(?:\.\d+)?)\s*(billion|million)")
 
@@ -85,7 +87,8 @@ _EPS_ADJ_SENT = re.compile(
     r"(?i)adjusted[^.\n]{0,80}?(?:earnings|net income|income)\s+per\s+(?:diluted\s+)?share[^.\n]{0,40}?"
     r"\$\s?([\d,]+\.\d+)")
 _EPS_GAAP_SENT = re.compile(
-    r"(?i)(?:diluted\s+)(?:earnings|net income|income)\s+per\s+share\s+(?:of|was|were)\s+"
+    r"(?i)(?:fully\s+)?(?:diluted\s+)(?:earnings|net income|income)\s+per\s+share"
+    r"[^.\n]{0,80}?"            # "for the three months ... declined to" (CPRT style)
     r"\$\s?([\d,]+\.\d+)")
 _FIRST_NUM = re.compile(r"\$?\s?([\d,]+\.\d+)")
 
@@ -165,7 +168,9 @@ def fetch_press_release(cik: int, accession: str) -> str | None:
 def edgar_recent_filings() -> dict:
     """cik -> (accession, items_string) from the real-time 8-K feed."""
     try:
-        xml = fetch(EDGAR_FEED, SEC_UA).decode(errors="replace")
+        # 4s timeout: SEC throttles datacenter IPs and a hung request must not
+        # blind the 2s loop for 20s (Sep 10: repeated 20s "read timed out")
+        xml = fetch(EDGAR_FEED, SEC_UA, timeout=4).decode(errors="replace")
     except Exception as e:
         print(f"[warn] EDGAR feed failed: {e}")
         return {}
@@ -203,7 +208,7 @@ def load_cik_map(tickers: set) -> dict:
 def edgar_recent_ciks() -> set:
     """CIKs present in the latest real-time 8-K feed."""
     try:
-        xml = fetch(EDGAR_FEED, SEC_UA).decode(errors="replace")
+        xml = fetch(EDGAR_FEED, SEC_UA, timeout=4).decode(errors="replace")
     except Exception as e:
         print(f"[warn] EDGAR feed failed: {e}")
         return set()
