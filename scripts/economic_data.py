@@ -365,7 +365,16 @@ def main():
         if fresh:
             by_day = fresh
         else:
-            print("[warn] feeds never rolled over - posting what we have.")
+            # NEVER post a stale week: a weekly calendar showing days that are
+            # already over is worse than no post (2026-09-13: members saw last
+            # week's calendar labelled as the week ahead). Drop past days; if
+            # nothing in the future remains, abort loudly and let the retry-
+            # dispatch (or a manual fire) publish it once the feeds roll.
+            by_day = {d: evs for d, evs in by_day.items() if d > _today_utc}
+            if not by_day:
+                print("[error] feeds never rolled over and hold only past days - "
+                      "NOT posting a stale weekly calendar. Re-dispatch later.")
+                return
 
     days = sorted(by_day)
     post_text("**WEEKLY CALENDAR**")
