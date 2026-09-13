@@ -838,8 +838,19 @@ def _reported_between(frm: date, to: date) -> list[dict]:
     # ONLY for symbols in OUR calendar - otherwise foreign ADR variants leak in
     # (e.g. Inditex showing twice as IDEXY + IDEXF).
     have = {(e.get("symbol"), e.get("date")) for e in entries}
+    if not expected:
+        print(f"[warn] Finnhub calendar empty for {frm}..{to} - FMP-only fallback")
     for r in _fmp_actuals_range(frm, to):
-        if r["symbol"] in expected and (r["symbol"], r["date"]) not in have:
+        sym = r.get("symbol") or ""
+        if (sym, r["date"]) in have:
+            continue
+        if expected:
+            if sym in expected:
+                entries.append(r)
+        # Finnhub calendar unavailable (2026-09-11: daily recap said "Nothing
+        # reported" while $KR sat in FMP). Accept FMP rows, but keep foreign
+        # OTC ADR variants out: 5-letter tickers ending in Y/F.
+        elif not (len(sym) == 5 and sym[-1] in "YF"):
             entries.append(r)
     if not entries:
         return []
